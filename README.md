@@ -21,8 +21,8 @@ Team Name:
 
 #### refenrence
 
-- ???
-
+- General-Cross-Validation-denoising-Forward: [https://github.com/smousavi05/General-Cross-Validation-denoising-Forward](https://github.com/smousavi05/General-Cross-Validation-denoising-Forward)
+- Denoising_GCVwavaletF: [https://github.com/tanxn5/Denoising_GCVwavaletF](https://github.com/tanxn5/Denoising_GCVwavaletF)
 
 ----
 by Armit
