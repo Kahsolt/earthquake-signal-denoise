@@ -15,6 +15,7 @@ ref/
 # generated
 gen/
 out/
+lightning_logs
 
 # logs
 log/

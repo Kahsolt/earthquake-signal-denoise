@@ -20,6 +20,8 @@ import matplotlib.pyplot as plt
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+torch.set_float32_matmul_precision('medium')
+
 BASE_PATH = Path(__file__).parent.relative_to(Path.cwd())
 DATA_PATH = BASE_PATH / 'data'
 LOG_PATH = BASE_PATH / 'log' ; LOG_PATH.mkdir(exist_ok=True)
