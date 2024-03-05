@@ -6,13 +6,12 @@ import sys
 from argparse import ArgumentParser
 
 import torch.nn.functional as F
-from torch.optim import Optimizer, SGD, Adam, AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim import Optimizer, SGD, Adam
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
 from data import SignalDataset, DataLoader
-from model_envolope import EnvolopeModel, EnvolopeExtractor
+from model import EnvolopeModel, EnvolopeExtractor
 from utils import *
 
 
@@ -39,13 +38,12 @@ class LitModel(LightningModule):
     self.valid_mae = MeanAbsoluteError()
 
   def configure_optimizers(self) -> Optimizer:
-    optimizer = Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-    return optimizer
-    #scheduler = CosineAnnealingLR(optimizer, T_max=self.epochs, verbose=True)
-    #return {
-    #  'optimizer': optimizer,
-    #  'lr_scheduler': scheduler,
-    #}
+    sel = 0
+    if sel == 0:
+      optim = Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+    else:
+      optim = SGD(self.model.parameters(), lr=self.lr, weight_decay=1e-5, momentum=0.9)
+    return optim
 
   def optimizer_step(self, epoch:int, batch_idx:int, optim:Optimizer, optim_closure:Callable):
     super().optimizer_step(epoch, batch_idx, optim, optim_closure)
@@ -82,19 +80,17 @@ def train(args):
   print('>> args:', vars(args))
 
   ''' Data '''
-  dataset_cls = SignalDataset
   dataloader_kwargs = {
     'num_workers': 0,
     'persistent_workers': False,
     'pin_memory': True,
   }
-  trainloader = DataLoader(dataset_cls('train'), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(dataset_cls('valid'), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  trainloader = DataLoader(SignalDataset('train', transform=wav_log1p), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SignalDataset('valid', transform=wav_log1p), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = EnvolopeModel()
   lit = LitModel(model)
-  lit.setup_train_args(args)
   if args.load:
     lit = LitModel.load_from_checkpoint(args.load, model=model)
   lit.setup_train_args(args)

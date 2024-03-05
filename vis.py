@@ -11,7 +11,7 @@ from traceback import print_exc, format_exc
 from scipy.fftpack import fft
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import seaborn as sns
 
 from utils import *
@@ -105,14 +105,17 @@ class App:
       fig.tight_layout()
       cvs = FigureCanvasTkAgg(fig, frm2)
       cvs.get_tk_widget().pack(expand=tk.YES, fill=tk.BOTH)
+      toolbar = NavigationToolbar2Tk(cvs, frm2, pack_toolbar=False)
+      toolbar.update()
+      toolbar.pack(side=tk.BOTTOM, fill=tk.X)
       self.fig, self.axs, self.cvs = fig, axs, cvs
 
   def change_split(self):
     split = self.var_split.get()
     if split == 'train':
-      self.X, self.Y = get_data_train(args.log1p)
+      self.X, self.Y = get_data_train()
     else:
-      self.X = get_data_test(args.log1p)
+      self.X = get_data_test()
       self.Y = get_submit_pred_maybe(len(self.X), self.args.fp)
     nlen = len(self.X)
     self.sc.config(to=nlen - 1)
@@ -139,8 +142,10 @@ class App:
     try:
       for i, x in enumerate([self.X[idx], self.Y[idx]]):
         if x is None: continue
-        if self.args.norm:
+        if self.args.T == 'norm':
           x = wav_norm(x)
+        elif self.args.T == 'log1p':
+          x = wav_log1p(x)
 
         M = get_spec(x, n_fft, hop_len, win_len)
         c0 = L.feature.rms(y=x, frame_length=n_fft, hop_length=hop_len, pad_mode='reflect')[0]
@@ -166,8 +171,7 @@ class App:
 if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('--fp', type=Path, help='submit file')
-  parser.add_argument('--norm', action='store_true')
-  parser.add_argument('--log1p', action='store_true')
+  parser.add_argument('-T', choices=['', 'norm', 'log1p'], default='raw signal transform')
   args = parser.parse_args()
 
   App(args)

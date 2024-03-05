@@ -29,6 +29,11 @@ SUBMIT_PATH = LOG_PATH / 'result.zip'
 
 NLEN = 24000  # 4min (1min before + 3min after)
 SR   = 100    # 100Hz
+N_SEG   = 4096    # in samples, N_FRAME = 4096/32 = 128
+N_FFT   = 128
+HOP_LEN = 32
+WIN_LEN = 128
+
 SEED = 114514
 
 
@@ -41,21 +46,22 @@ def timer(fn):
     return r
   return wrapper
 
+def stat_tensor(x:Tensor, name:str='X'):
+  print(f'[{name}] {x.shape}')
+  print('  max:', x.max())
+  print('  min:', x.min())
+  print('  avg:', x.mean())
+  print('  std:', x.std())
+
 
 @timer
-def get_data_train(is_log1p:bool=True) -> Tuple[ndarray, ndarray]:
-  if is_log1p:
-    data = np.load(DATA_PATH / 'train-log.npz')
-  else:
-    data = np.load(DATA_PATH / 'train.npz')
+def get_data_train() -> Tuple[ndarray, ndarray]:
+  data = np.load(DATA_PATH / 'train.npz')
   return data['X'], data['Y']
 
 @timer
-def get_data_test(is_log1p:bool=True) -> ndarray:
-  if is_log1p:
-    data = np.load(DATA_PATH / 'test-log.npz')
-  else:
-    data = np.load(DATA_PATH / 'test.npz')
+def get_data_test() -> ndarray:
+  data = np.load(DATA_PATH / 'test.npz')
   return data['X']
 
 def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
@@ -65,16 +71,44 @@ def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
   return np.loadtxt(fp, dtype=np.int32)
 
 
-def wav_norm(X:ndarray) -> ndarray:
-  X_min = X.min(axis=-1, keepdims=True)
-  X_max = X.max(axis=-1, keepdims=True)
-  X = (X - X_min) / (X_max - X_min)
-  X -= 0.5    # [-0.5, 0.5]
-  X -= X.mean(axis=-1, keepdims=True)   # remove DC offset
-  return X    # ~[-0.5, 0.5]
+def wav_log1p(x:ndarray) -> ndarray:
+  mask = x >= 0
+  pos = x *  mask
+  neg = x * ~mask
+  pos_log1p =  np.log1p( pos)
+  neg_log1p = -np.log1p(-neg)
+  return np.where(mask, pos_log1p, neg_log1p)
+
+def wav_norm(x:ndarray, C:float=5.0, remove_DC:bool=True) -> ndarray:
+  X_min = x.min(axis=-1, keepdims=True)
+  X_max = x.max(axis=-1, keepdims=True)
+  x = (x - X_min) / (X_max - X_min)   # [0, 1]
+  x = (x - 0.5) * 2 * C   # ~[-C, C]
+  if remove_DC: x -= x.mean(axis=-1, keepdims=True)   # remove DC offset
+  return x
 
 
 def get_spec(y:ndarray, n_fft:int=256, hop_len:int=16, win_len:int=64) -> ndarray:
   D = L.stft(y, n_fft=n_fft, hop_length=hop_len, win_length=win_len)
   M = np.clip(np.log(np.abs(D) + 1e-15), a_min=1e-5, a_max=None)
   return M
+
+
+def signal_noise_ratio(y_hat:ndarray, y:ndarray):
+  ''' 信噪比对数值缩放敏感 '''
+  return 1.0 * np.log10(np.sum(np.power(y, 2)) / np.sum(np.power(y - y_hat, 2)))
+
+def cross_correlation_coefficient(y_hat:ndarray, y:ndarray):
+  ''' 互相关系数对数值缩放完全不敏感 '''
+  y_shift = y - y.mean()
+  y_hat_shift = y_hat - y_hat.mean()
+  return np.sum(y_shift * y_hat_shift) / np.sqrt(np.sum(np.power(y_shift, 2)) * np.sum(np.power(y_hat_shift, 2)))
+
+
+if __name__ == '__main__':
+  X, Y = get_data_train()
+  for i, (x, y) in enumerate(zip(X, Y)):
+    ''' [正常评估中] y_hat: 测振(CZ)预测值, y: 测振(CZ)真值 '''
+    snr = signal_noise_ratio(x, y)
+    ccc = cross_correlation_coefficient(x, y)
+    print(f'[{i}] snr: {snr:.3f}, ccc: {ccc:.3f}')

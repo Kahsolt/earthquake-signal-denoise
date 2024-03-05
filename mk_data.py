@@ -74,45 +74,6 @@ def process_train():
     json.dump(lens_dict, fh, indent=2, ensure_ascii=False)
 
 
-def transform_log1p(x:ndarray) -> ndarray:
-  mask = x >= 0
-  pos = x *  mask
-  neg = x * ~mask
-  pos_log1p =  np.log1p( pos)
-  neg_log1p = -np.log1p(-neg)
-  return np.where(mask, pos_log1p, neg_log1p)
-
-
-def reprocess_test_log1p():
-  fp_out = DATA_PATH / 'test-log.npz'
-  if fp_out.exists():
-    print(f'>> ignore due to file exists: {fp_out.name}')
-    return
-
-  X = get_data_test(is_log1p=False)
-  data_dict = {
-    'X': transform_log1p(X),
-  }
-  np.savez_compressed(fp_out, **data_dict)
-
-
-def reprocess_train_log1p():
-  fp_out = DATA_PATH / 'train-log.npz'
-  if fp_out.exists():
-    print(f'>> ignore due to file exists: {fp_out.name}')
-    return
-
-  X, Y = get_data_train(is_log1p=False)
-  data_dict = {
-    'X': transform_log1p(X),
-    'Y': transform_log1p(Y),
-  }
-  np.savez_compressed(fp_out, **data_dict)
-
-
 if __name__ == '__main__':
   process_test()
   process_train()
-  
-  reprocess_test_log1p()
-  reprocess_train_log1p()

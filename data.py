@@ -17,48 +17,72 @@ def make_split(X:ndarray, Y:ndarray, split:str='train', ratio:float=0.1) -> List
   else:                data = data[-cp:]
   return data
 
-def sample_to_XY(data:Union[Tuple[ndarray, int], ndarray]) -> Tuple[ndarray, int]:
-  return data if isinstance(data, tuple) else (data, -1)
-
 
 class SignalDataset(Dataset):
 
-  def __init__(self, split:str='train', transform:Callable=None, ratio:float=0.1):
+  def __init__(self, split:str='train', transform:Callable=None, n_seg:int=-1, ratio:float=0.1):
     self.split = split
-    self.is_train = split in ['train', 'valid']
+    self.n_seg = n_seg
 
     if self.is_train:
       X, Y = get_data_train()
-      if transform: X = transform(X)
+      if transform:
+        X = transform(X)
+        Y = transform(Y)
       self.data = make_split(X, Y, split, ratio)
     else:
       X = get_data_test()
       if transform: X = transform(X)
       self.data = X
 
+  @property
+  def is_train(self):
+    return self.split in ['train', 'valid']
+
   def __len__(self):
     return len(self.data)
 
   def __getitem__(self, idx):
-    data = self.data[idx]
-    X, Y = sample_to_XY(data)
-    return np.expand_dims(X, axis=0), np.expand_dims(Y, axis=0)
+    if self.is_train:
+      X, Y = self.data[idx]
+      if self.n_seg > 0:
+        cp = random.randrange(len(X) - self.n_seg)
+        slicer = slice(cp, cp + self.n_seg)
+        X, Y = X[slicer], Y[slicer]
+      return [np.expand_dims(e, axis=0) for e in [X, Y]]
+    else:
+      X = self.data[idx]
+      return np.expand_dims(X, axis=0)
 
 
 class SpecDataset(SignalDataset):
 
+  def __init__(self, split:str='train', transform:Callable=None, n_seg:int=N_SEG, ratio:float=0.1):
+    super().__init__(split, transform, n_seg, ratio)
+
+    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], N_FFT, HOP_LEN, WIN_LEN)
+
   def __getitem__(self, idx):
-    data = self.data[idx]
-    X, Y = sample_to_XY(data)
-    MX = get_spec(X[:-1])
-    MY = get_spec(Y[:-1])
-    return MX, MY
+    if self.is_train:
+      X, Y = super().__getitem__(idx)
+      MX = self.get_spec_(X)   # [F=65, L=128]
+      MY = self.get_spec_(Y)
+      return MX, MY
+    else:
+      X = super().__getitem__(idx)
+      MX = self.get_spec_(X)
+      return MX
 
 
 if __name__ == '__main__':
-  dataset = SignalDataset()
+  dataset = SignalDataset(transform=wav_norm)
   for X, Y in iter(dataset):
-    print('X:', X)
-    print('X.shape:', X.shape)
-    print('Y:', Y)
+    stat_tensor(X, 'X')
+    stat_tensor(Y, 'Y')
+    break
+
+  dataset = SpecDataset()
+  for X, Y in iter(dataset):
+    stat_tensor(X, 'X')
+    stat_tensor(Y, 'Y')
     break

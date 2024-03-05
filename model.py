@@ -16,6 +16,8 @@ def get_padding(kernel_size:int, stride:int):
 
 class EnvolopeModel(nn.Module):
 
+  ''' log1p(QZ signal) -> log1p(CZ envolope) '''
+
   def __init__(self):
     super().__init__()
 
@@ -67,6 +69,8 @@ class EnvolopeModel(nn.Module):
 
 class EnvolopeExtractor(nn.Module):
 
+  ''' signal -> dynamic envolope '''
+
   def __init__(self, n_avg:int=2):
     super().__init__()
 
@@ -81,8 +85,20 @@ class EnvolopeExtractor(nn.Module):
     for _ in range(self.n_avg):
       upper = self.avgpool(upper)
       lower = self.avgpool(lower)
-    envolope = torch.cat([upper, lower], dim=1)
-    return envolope
+    return torch.cat([upper, lower], dim=1)
+
+
+class DenoiseModel(nn.Module):
+
+  ''' spectrogram -> denoised spectrogram '''
+
+  def __init__(self):
+    super().__init__()
+
+    # x192 downsample: [65, 128] => 125
+
+  def forward(self, x:Tensor) -> Tensor:
+    return x
 
 
 if __name__ == '__main__':
@@ -97,3 +113,11 @@ if __name__ == '__main__':
   extractor = EnvolopeExtractor()
   out = extractor(Y)
   print(out.shape)  # [B, C=2, L]
+
+  # spec -> denosied spec
+  N_SPEC = 128 // 2 + 1
+  N_FRAME = 24000 // 32
+  Y = torch.rand([4, 1, N_SPEC, N_FRAME])
+  denoiser = DenoiseModel()
+  out = denoiser(Y)
+  print(out.shape)  # [B, C=2, F, L]
