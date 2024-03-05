@@ -19,11 +19,13 @@ def plot_value_hist(X:ndarray, Y:ndarray):
 
 
 X, Y = get_data_train()
+#plot_value_hist(X, Y)
+
 for i, (x, y) in enumerate(zip(X, Y)):
   data = torch.from_numpy(y).unsqueeze(dim=0).cuda()
   upper =  maxpool( data)
   lower = -maxpool(-data)
-  for i in range(3):
+  for i in range(2):
     upper = avgpool(upper)
     lower = avgpool(lower)
   upper = upper.squeeze(0).cpu().numpy()

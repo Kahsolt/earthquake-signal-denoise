@@ -43,12 +43,19 @@ def timer(fn):
 
 
 @timer
-def get_data_train() -> Tuple[ndarray, ndarray]:
-  data = np.load(DATA_PATH / 'train.npz')
+def get_data_train(is_log1p:bool=True) -> Tuple[ndarray, ndarray]:
+  if is_log1p:
+    data = np.load(DATA_PATH / 'train-log.npz')
+  else:
+    data = np.load(DATA_PATH / 'train.npz')
   return data['X'], data['Y']
 
-def get_data_test() -> ndarray:
-  data = np.load(DATA_PATH / 'test.npz')
+@timer
+def get_data_test(is_log1p:bool=True) -> ndarray:
+  if is_log1p:
+    data = np.load(DATA_PATH / 'test-log.npz')
+  else:
+    data = np.load(DATA_PATH / 'test.npz')
   return data['X']
 
 def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
