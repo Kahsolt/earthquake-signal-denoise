@@ -5,15 +5,13 @@
 import sys
 from argparse import ArgumentParser
 
-import torch
 import torch.nn.functional as F
 from torch.optim import Optimizer, SGD, Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
-
-from data import *
+from data import SignalDataset, DataLoader
 from model_envolope import EnvolopeModel, EnvolopeExtractor
 from utils import *
 
@@ -29,62 +27,53 @@ class LitModel(LightningModule):
     self.args = None
     self.epochs = -1
     self.lr = 2e-4
-    self.mae = None
+    self.train_mae = None
+    self.valid_mae = None
     self.envolope_extractor = EnvolopeExtractor()
 
   def setup_train_args(self, args):
     self.args = args
     self.epochs = args.epochs
     self.lr = args.lr
-    self.mae = MeanAbsoluteError()
+    self.train_mae = MeanAbsoluteError()
+    self.valid_mae = MeanAbsoluteError()
 
   def configure_optimizers(self) -> Optimizer:
     optimizer = Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-    scheduler = CosineAnnealingLR(optimizer, T_max=self.epochs, verbose=True)
-    return {
-      'optimizer': optimizer,
-      'lr_scheduler': scheduler,
-    }
+    return optimizer
+    #scheduler = CosineAnnealingLR(optimizer, T_max=self.epochs, verbose=True)
+    #return {
+    #  'optimizer': optimizer,
+    #  'lr_scheduler': scheduler,
+    #}
 
   def optimizer_step(self, epoch:int, batch_idx:int, optim:Optimizer, optim_closure:Callable):
     super().optimizer_step(epoch, batch_idx, optim, optim_closure)
     if batch_idx % 10 == 0:
-      self.log_dict({f'lr-{i}': group['lr'] for i, group in enumerate(optim.param_groups)})
+      self.log_dict({f'lr/{i}': group['lr'] for i, group in enumerate(optim.param_groups)})
 
-  def get_losses(self, batch:Tuple[Tensor], batch_idx:int) -> Tuple[Tensor, Dict[str, float]]:
+  def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tuple[Tensor, Dict[str, float]]:
     x, y = batch
-
     output = self.model(x)
     envolope = self.envolope_extractor(y)
     loss = F.mse_loss(output, envolope)
 
-    if batch_idx % 100 == 0:
-      with torch.no_grad():
-        self.mae(output, envolope)
-        log_dict = {
-          'l_total': loss.item(),
-        }
-    else: log_dict = None
-    return loss, log_dict
+    if prefix == 'train':
+      self.train_mae(output, envolope)
+      self.log('train/mae', self.train_mae, on_step=True, on_epoch=True)
+      self.log('train/loss', loss.item(), on_step=True, on_epoch=True)
+    else:
+      self.valid_mae(output, envolope)
+      self.log('valid/mae', self.valid_mae, on_step=False, on_epoch=True)
+      self.log('valid/loss', loss.item(), on_step=False, on_epoch=True)
 
-  def on_train_epoch_end(self):
-    self.log('train/mae/epoch', self.mae, on_step=False, on_epoch=True)
-
-  def on_validation_epoch_end(self):
-    self.log('valid/mae/epoch', self.mae, on_step=False, on_epoch=True)
-
-  def log_losses(self, log_dict:Dict[str, float], prefix:str='log'):
-    self.log_dict({f'{prefix}/{k}': v for k, v in log_dict.items()})
+    return loss
 
   def training_step(self, batch:Tuple[Tensor], batch_idx:int) -> Tensor:
-    loss, log_dict = self.get_losses(batch, batch_idx)
-    if log_dict: self.log_losses(log_dict, 'train')
-    return loss
+    return self.get_losses(batch, 'train')
 
   def validation_step(self, batch:Tuple[Tensor], batch_idx:int) -> Tensor:
-    loss, log_dict = self.get_losses(batch, batch_idx)
-    if log_dict: self.log_losses(log_dict, 'valid')
-    return loss
+    return self.get_losses(batch, 'valid')
 
 
 def train(args):
@@ -122,8 +111,8 @@ def train(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
-  parser.add_argument('-B', '--batch_size', type=int, default=16)
-  parser.add_argument('-E', '--epochs',     type=int, default=35)
+  parser.add_argument('-B', '--batch_size', type=int, default=64)
+  parser.add_argument('-E', '--epochs',     type=int, default=30)
   parser.add_argument('-lr', '--lr',        type=eval, default=2e-4)
   parser.add_argument('--load', type=Path, help='ckpt to resume from')
   parser.add_argument('--seed', type=int, default=114514)

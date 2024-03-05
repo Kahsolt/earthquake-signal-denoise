@@ -67,9 +67,10 @@ class EnvolopeModel(nn.Module):
 
 class EnvolopeExtractor(nn.Module):
 
-  def __init__(self):
+  def __init__(self, n_avg:int=2):
     super().__init__()
 
+    self.n_avg = n_avg
     self.maxpool = nn.MaxPool1d(kernel_size=161, stride=1, padding=80)
     self.avgpool = nn.AvgPool1d(kernel_size=81,  stride=1, padding=40)
 
@@ -77,20 +78,22 @@ class EnvolopeExtractor(nn.Module):
   def forward(self, x:Tensor) -> Tensor:
     upper =  self.maxpool( x)
     lower = -self.maxpool(-x)
-    #for _ in range(2):
-    #  upper = self.avgpool(upper)
-    #  lower = self.avgpool(lower)
+    for _ in range(self.n_avg):
+      upper = self.avgpool(upper)
+      lower = self.avgpool(lower)
     envolope = torch.cat([upper, lower], dim=1)
     return envolope
 
 
 if __name__ == '__main__':
+  # QZ signal -> CZ envolope (upper & lower)
   X = torch.rand([4, 1, NLEN])
   model = EnvolopeModel()
   out = model(X)
-  print(out.shape)
+  print(out.shape)  # [B, C=2, L]
 
-  Y = torch.rand([4, 2, NLEN])
+  # signal -> envolope (upper & lower)
+  Y = torch.rand([4, 1, NLEN])
   extractor = EnvolopeExtractor()
   out = extractor(Y)
-  print(out.shape)
+  print(out.shape)  # [B, C=2, L]

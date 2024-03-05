@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from utils import *
 
 
-def make_split(X:ndarray, Y:ndarray, split:str='train', ratio:float=0.3) -> List[Tuple[ndarray, int]]:
+def make_split(X:ndarray, Y:ndarray, split:str='train', ratio:float=0.1) -> List[Tuple[ndarray, int]]:
   data = [(x, y) for x, y in zip(X, Y)]
   random.seed(SEED)
   random.shuffle(data)
@@ -23,7 +23,7 @@ def sample_to_XY(data:Union[Tuple[ndarray, int], ndarray]) -> Tuple[ndarray, int
 
 class SignalDataset(Dataset):
 
-  def __init__(self, split:str='train', transform:Callable=None, ratio:float=0.3):
+  def __init__(self, split:str='train', transform:Callable=None, ratio:float=0.1):
     self.split = split
     self.is_train = split in ['train', 'valid']
 
