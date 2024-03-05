@@ -110,9 +110,9 @@ class App:
   def change_split(self):
     split = self.var_split.get()
     if split == 'train':
-      self.X, self.Y = get_data_train()
+      self.X, self.Y = get_data_train(args.log1p)
     else:
-      self.X = get_data_test()
+      self.X = get_data_test(args.log1p)
       self.Y = get_submit_pred_maybe(len(self.X), self.args.fp)
     nlen = len(self.X)
     self.sc.config(to=nlen - 1)
@@ -167,6 +167,7 @@ if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('--fp', type=Path, help='submit file')
   parser.add_argument('--norm', action='store_true')
+  parser.add_argument('--log1p', action='store_true')
   args = parser.parse_args()
 
   App(args)
