@@ -47,11 +47,15 @@ class SignalDataset(Dataset):
       X, Y = self.data[idx]
       if self.n_seg > 0:
         cp = random.randrange(len(X) - self.n_seg)
-        slicer = slice(cp, cp + self.n_seg)
+        self.id_rng = [cp, cp + self.n_seg]
+        slicer = slice(*self.id_rng)
         X, Y = X[slicer], Y[slicer]
+      else:
+        self.id_rng = [0, len(X)]
       return [np.expand_dims(e, axis=0) for e in [X, Y]]
     else:
       X = self.data[idx]
+      self.id_rng = [0, len(X)]
       return np.expand_dims(X, axis=0)
 
 
@@ -60,29 +64,35 @@ class SpecDataset(SignalDataset):
   def __init__(self, split:str='train', transform:Callable=None, n_seg:int=N_SEG, ratio:float=0.1):
     super().__init__(split, transform, n_seg, ratio)
 
-    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], N_FFT, HOP_LEN, WIN_LEN)
+    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], N_FFT, HOP_LEN, WIN_LEN)[:-1, :]   # ignore last band (hifreq ~1e-5)
+
+  @property
+  def id_rng_spec(self) -> Tuple[int]:
+    x, y = self.id_rng
+    return x // HOP_LEN, y // HOP_LEN
 
   def __getitem__(self, idx):
     if self.is_train:
       X, Y = super().__getitem__(idx)
-      MX = self.get_spec_(X)   # [F=65, L=128]
+      MX = self.get_spec_(X)   # [F=64, L=128]
       MY = self.get_spec_(Y)
-      return MX, MY
+      return MX, MY, torch.arange(*self.id_rng_spec)
     else:
       X = super().__getitem__(idx)
       MX = self.get_spec_(X)
-      return MX
+      return MX, torch.arange(*self.id_rng_spec)
 
 
 if __name__ == '__main__':
   dataset = SignalDataset(transform=wav_norm)
   for X, Y in iter(dataset):
-    stat_tensor(X, 'X')
+    stat_tensor(X, 'X')   # [1, 24000]
     stat_tensor(Y, 'Y')
     break
 
-  dataset = SpecDataset()
-  for X, Y in iter(dataset):
-    stat_tensor(X, 'X')
+  dataset = SpecDataset(transform=wav_norm)
+  for X, Y, ids in iter(dataset):
+    stat_tensor(X, 'X')   # [64, 128]
     stat_tensor(Y, 'Y')
+    stat_tensor(ids, 'ids')
     break

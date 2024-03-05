@@ -5,12 +5,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils import weight_norm
+from torch.nn.utils.parametrizations import weight_norm
 
 from utils import *
 
 
-def get_padding(kernel_size:int, stride:int):
+def get_padding(kernel_size:int, stride:int=2):
   return (kernel_size - stride) // 2
 
 
@@ -88,6 +88,35 @@ class EnvolopeExtractor(nn.Module):
     return torch.cat([upper, lower], dim=1)
 
 
+class ResBlock(nn.Module):
+
+  def __init__(self, dim:int, ks:List[int]=[3, 1]):
+    super().__init__()
+
+    self.convs = nn.ModuleList([weight_norm(nn.Conv2d(dim, dim, kernel_size=k, padding=k//2)) for k in ks])
+
+  def forward(self, x:Tensor) -> Tensor:
+    r = x
+    for conv in self.convs:
+      o = F.leaky_relu(x)
+      o = conv(o)
+      x = x + o
+    return x + r
+
+
+class GatedActivation(nn.Module):
+
+  def __init__(self, dim:int, k:int=5):
+    super().__init__()
+
+    self.conv = weight_norm(nn.Conv2d(dim, dim*2, kernel_size=k, padding=k//2))
+
+  def forward(self, x:Tensor) -> Tensor:
+    o = self.conv(x)
+    fx, gx = torch.chunk(o, 2, dim=1)
+    return fx * F.sigmoid(gx)
+
+
 class DenoiseModel(nn.Module):
 
   ''' spectrogram -> denoised spectrogram '''
@@ -95,9 +124,72 @@ class DenoiseModel(nn.Module):
   def __init__(self):
     super().__init__()
 
-    # x192 downsample: [65, 128] => 125
+    # learnable posenc for index L=128
+    embed_dim = 32
+    self.posenc = nn.Embedding(NLEN//HOP_LEN, embed_dim)
 
-  def forward(self, x:Tensor) -> Tensor:
+    # x8 downsample: [1+embed_dim, 64, 128] => [256, 8, 16] => [1, 64, 128]
+    self.pre_conv = weight_norm(nn.Conv2d(1+embed_dim, 32, kernel_size=7, padding=3))
+    self.downs = nn.ModuleList([
+      ResBlock(32),
+      nn.LeakyReLU(),
+      weight_norm(nn.Conv2d( 32,  64, kernel_size=4, stride=2, groups=2, padding=get_padding(4))),
+      ResBlock(64),
+      nn.LeakyReLU(),
+      weight_norm(nn.Conv2d( 64, 128, kernel_size=4, stride=2, groups=4, padding=get_padding(4))),
+      ResBlock(128),
+      nn.LeakyReLU(),
+      weight_norm(nn.Conv2d(128, 256, kernel_size=4, stride=2, groups=8, padding=get_padding(4))),
+    ])
+    self.ini = nn.ModuleList([
+      nn.LeakyReLU(),
+      weight_norm(nn.Conv2d(256, 256, kernel_size=1)),
+      GatedActivation(256, k=5),
+      weight_norm(nn.Conv2d(256, 256, kernel_size=1, groups=16)),
+    ])
+    self.ups = nn.ModuleList([
+      ResBlock(256),
+      nn.LeakyReLU(),
+      weight_norm(nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=get_padding(4))),
+      ResBlock(128),
+      nn.LeakyReLU(),
+      weight_norm(nn.ConvTranspose2d(128,  64, kernel_size=4, stride=2, padding=get_padding(4))),
+      ResBlock(64),
+      nn.LeakyReLU(),
+      weight_norm(nn.ConvTranspose2d( 64,  32, kernel_size=4, stride=2, padding=get_padding(4))),
+    ])
+    self.post_conv = weight_norm(nn.Conv2d(32, 1, kernel_size=7, padding=3))
+
+  def forward(self, x:Tensor, ids:Tensor) -> Tensor:
+    DEBUG_SHAPE = False
+
+    if DEBUG_SHAPE: print('x:', x.shape)      # [B, F=65, L=128]
+    if DEBUG_SHAPE: print('ids:', ids.shape)  # [B, L]
+
+    pe: Tensor = self.posenc(ids)   # [B, L=128, D=32]
+    if DEBUG_SHAPE: print('pe:', pe.shape)
+    pe_ex = pe.swapaxes(1, 2).unsqueeze(dim=-2).expand(-1, -1, x.shape[-2], -1)
+    if DEBUG_SHAPE: print('pe_ex:', pe_ex.shape)
+    x = torch.cat([x.unsqueeze(dim=1), pe_ex], dim=1)
+    if DEBUG_SHAPE: print('x_cat:', x.shape)
+
+    x = self.pre_conv(x)
+    if DEBUG_SHAPE: print('pre_conv:', x.shape)
+    for i, layer in enumerate(self.downs):
+      x = layer(x)
+      if DEBUG_SHAPE: print(f'downs-{i}:', x.shape)
+    for i, layer in enumerate(self.ini):
+      x = layer(x)
+      if DEBUG_SHAPE: print(f'ini-{i}:', x.shape)
+    for i, layer in enumerate(self.ups):
+      x = layer(x)
+      if DEBUG_SHAPE: print(f'ups-{i}:', x.shape)
+    x = F.leaky_relu(x)
+    x = self.post_conv(x)
+    if DEBUG_SHAPE: print('post_conv:', x.shape)
+
+    x = x.squeeze(dim=1)
+    if DEBUG_SHAPE: print('out:', x.shape)
     return x
 
 
@@ -115,9 +207,10 @@ if __name__ == '__main__':
   print(out.shape)  # [B, C=2, L]
 
   # spec -> denosied spec
-  N_SPEC = 128 // 2 + 1
-  N_FRAME = 24000 // 32
-  Y = torch.rand([4, 1, N_SPEC, N_FRAME])
+  N_SPEC = N_FFT // 2
+  N_FRAME = N_SEG // HOP_LEN
+  M = torch.rand([4, N_SPEC, N_FRAME])
   denoiser = DenoiseModel()
-  out = denoiser(Y)
-  print(out.shape)  # [B, C=2, F, L]
+  ids = torch.arange(N_FRAME).unsqueeze(dim=0).expand(M.shape[0], -1)
+  out = denoiser(M, ids)
+  print(out.shape)  # [B, C=1, F, L]
