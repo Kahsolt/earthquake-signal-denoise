@@ -6,6 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.parametrizations import weight_norm
+from torch.nn.utils.parametrize import remove_parametrizations
+
+remove_weight_norm = lambda mod: remove_parametrizations(mod, 'weight')
 
 from utils import *
 
@@ -66,6 +69,13 @@ class EnvolopeModel(nn.Module):
     if DEBUG_SHAPE: print(f'post_conv:', x.shape)
     return x
 
+  def remove_weight_norm(self):
+    remove_weight_norm(self.pre_conv)
+    for conv in self.downs: remove_weight_norm(conv)
+    for conv in self.ini: remove_weight_norm(conv)
+    for conv in self.ups: remove_weight_norm(conv)
+    remove_weight_norm(self.post_conv)
+
 
 class EnvolopeExtractor(nn.Module):
 
@@ -103,6 +113,9 @@ class ResBlock(nn.Module):
       x = x + o
     return x + r
 
+  def remove_weight_norm(self):
+    for conv in self.convs: remove_weight_norm(conv)
+
 
 class GatedActivation(nn.Module):
 
@@ -115,6 +128,9 @@ class GatedActivation(nn.Module):
     o = self.conv(x)
     fx, gx = torch.chunk(o, 2, dim=1)
     return fx * F.sigmoid(gx)
+
+  def remove_weight_norm(self):
+    remove_weight_norm(self.conv)
 
 
 class DenoiseModel(nn.Module):
@@ -192,11 +208,31 @@ class DenoiseModel(nn.Module):
     if DEBUG_SHAPE: print('out:', x.shape)
     return x
 
+  def remove_weight_norm(self):
+    remove_weight_norm(self.pre_conv)
+    for layer in self.downs:
+      if isinstance(layer, ResBlock):
+        layer.remove_weight_norm()
+      elif isinstance(layer, nn.Conv2d):
+        remove_weight_norm(layer)
+    for layer in self.ini:
+      if isinstance(layer, GatedActivation):
+        layer.remove_weight_norm()
+      elif isinstance(layer, nn.Conv2d):
+        remove_weight_norm(layer)
+    for layer in self.ups:
+      if isinstance(layer, ResBlock):
+        layer.remove_weight_norm()
+      elif isinstance(layer, nn.Conv2d):
+        remove_weight_norm(layer)
+    remove_weight_norm(self.post_conv)
+
 
 if __name__ == '__main__':
   # QZ signal -> CZ envolope (upper & lower)
   X = torch.rand([4, 1, NLEN])
   model = EnvolopeModel()
+  model.remove_weight_norm()
   out = model(X)
   print(out.shape)  # [B, C=2, L]
 
@@ -209,6 +245,7 @@ if __name__ == '__main__':
   # spec -> denosied spec
   M = torch.rand([4, N_SPEC-1, N_FRAME])
   denoiser = DenoiseModel()
+  denoiser.remove_weight_norm()
   ids = torch.arange(N_FRAME).unsqueeze(dim=0).expand(M.shape[0], -1)
   out = denoiser(M, ids)
   print(out.shape)  # [B, C=1, F, L]

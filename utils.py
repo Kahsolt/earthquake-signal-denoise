@@ -57,7 +57,7 @@ def timer(fn):
   return wrapper
 
 def now_ts():   # 2024-03-06#15-58-36
-  return str(datetime.now()).split('.')[0].replace(' ', '#').replace(':', '-')
+  return str(datetime.now()).split('.')[0].replace(' ', '_').replace(':', '-')
 
 def stat_tensor(x:Tensor, name:str='X'):
   print(f'[{name}] {x.shape}')

@@ -21,10 +21,13 @@ if 'configs':
 
 
 @torch.inference_mode()
+@timer
 def infer(args):
   ''' Model & Ckpt '''
-  model_D = DenoiserLitModel.load_from_checkpoint(args.load_D, model=DenoiseModel()).model.to(device)
-  model_E = EnvolopeLitModel.load_from_checkpoint(args.load_E, model=EnvolopeModel()).model.to(device)
+  model_D: DenoiseModel = DenoiserLitModel.load_from_checkpoint(args.load_D, model=DenoiseModel()).model.to(device)
+  model_E: EnvolopeModel = EnvolopeLitModel.load_from_checkpoint(args.load_E, model=EnvolopeModel()).model.to(device)
+  model_D.remove_weight_norm()
+  model_E.remove_weight_norm()
   envolope_extractor = EnvolopeExtractor().to(device)
 
   def denoise(M:ndarray) -> ndarray:
@@ -32,17 +35,27 @@ def infer(args):
     X = torch.from_numpy(M)      .to(device)   # [F, L]
     E = torch.arange(M.shape[-1]).to(device)   # [L]
 
-    M_d = np.zeros_like(M, dtype=np.float32)   # [F, L]
-    C_d = np.zeros_like(M, dtype=np.uint8)     # [F, L]
+    # slice & pack
+    slicers = []
+    X_segs, E_segs = [], []
     sp = 0
     for _ in range(N_INFER):
       seg_slicer = slice(sp, sp + N_FRAME_INFER)
-      X_seg = X[:, seg_slicer]
-      E_seg = E[   seg_slicer]
-      M_d[:, seg_slicer] += model_D(X_seg.unsqueeze(0), E_seg.unsqueeze(0))[0].cpu().numpy()
-      C_d[:, seg_slicer] += 1
+      slicers.append(seg_slicer)
+      X_segs.append(X[:, seg_slicer])
+      E_segs.append(E[   seg_slicer])
       sp += N_FRAME_INFER - N_OVERLAP
-    return M_d / C_d
+    X_segs = torch.stack(X_segs, dim=0)
+    E_segs = torch.stack(E_segs, dim=0)
+    # forward
+    M_segs = model_D(X_segs, E_segs)
+    # unpack & unslice
+    M_d = torch.zeros_like(X, dtype=torch.float32)   # [F, L]
+    C_d = torch.zeros_like(X, dtype=torch.uint8)     # [F, L]
+    for seg_slicer, M_seg in zip(slicers, M_segs):
+      M_d[:, seg_slicer] += M_seg
+      C_d[:, seg_slicer] += 1
+    return (M_d / C_d).cpu().numpy()
 
   ''' Data & Infer '''
   X = get_data_test()
@@ -60,7 +73,7 @@ def infer(args):
       logM_low_denoised = denoise(logM_low)   # [F=64, L=750]
       logM_denoised = np.concatenate([logM_low_denoised, logM_high], axis=0)  # [F=65, L=750]
       D_denoised = np.exp(logM_denoised) * P
-      x_norm_denoised = L.istft(D_denoised, **FFT_PARAMS, length=len(x_norm))
+      x_norm_denoised: ndarray = L.istft(D_denoised, **FFT_PARAMS, length=len(x_norm))
 
       if args.debug and 'cmp spec denoise':
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
@@ -73,32 +86,31 @@ def infer(args):
         plt.show()
 
       # log1p domain: noisy signal -> denoised envolope
-      x_lop1p = wav_log1p(x)
-      envolope = model_E(torch.from_numpy(x_lop1p).unsqueeze(0).unsqueeze(0).to(device))[0].cpu().numpy()
-      z_lop1p_upper, z_lop1p_lower = envolope
-      z_upper, z_lower = np.expm1(z_lop1p_upper), -np.expm1(-z_lop1p_lower)
+      x_lop1p: ndarray = wav_log1p(x)
+      z_lop1p_upper, z_lop1p_lower = model_E(torch.from_numpy(x_lop1p).to(device).unsqueeze(0).unsqueeze(0))[0]
+      z_upper, z_lower = torch.expm1(z_lop1p_upper), -torch.expm1(-z_lop1p_lower)
 
       if args.debug and 'cmp envolope mapping':
         plt.clf()
         plt.subplot(221) ; plt.title('1. x')                ; plt.plot(x)
         plt.subplot(222) ; plt.title('2. x_log1p')          ; plt.plot(x_lop1p)
-        plt.subplot(223) ; plt.title('4. target env')       ; plt.plot(z_upper)       ; plt.plot(z_lower)
-        plt.subplot(224) ; plt.title('3. target env_log1p') ; plt.plot(z_lop1p_upper) ; plt.plot(z_lop1p_lower)
+        plt.subplot(223) ; plt.title('4. target env')       ; plt.plot(z_upper      .cpu().numpy()) ; plt.plot(z_lower      .cpu().numpy())
+        plt.subplot(224) ; plt.title('3. target env_log1p') ; plt.plot(z_lop1p_upper.cpu().numpy()) ; plt.plot(z_lop1p_lower.cpu().numpy())
         plt.suptitle('infer envolope model')
         plt.show()
 
       # shift predicted `x_norm_denoised` to predicted envolope of `[z_upper, z_lower]`
-      y_upper, y_lower = envolope_extractor(torch.from_numpy(x_norm_denoised).unsqueeze(0).unsqueeze(0).to(device))[0].cpu().numpy()
-      upper_scale_shift = (z_upper / y_upper).mean()
-      lower_scale_shift = (z_lower / y_lower).mean()
-      scale_shift = (upper_scale_shift + lower_scale_shift) / 2
-      x_denoised_shifted = x_norm_denoised * scale_shift
+      y_upper, y_lower = envolope_extractor(torch.from_numpy(x_norm_denoised).to(device).unsqueeze(0).unsqueeze(0))[0]
+      upper_scale_shift = torch.mean(z_upper / y_upper)
+      lower_scale_shift = torch.mean(z_lower / y_lower)
+      scale_shift: float = ((upper_scale_shift + lower_scale_shift) / 2).item()
+      x_denoised_shifted: ndarray = x_norm_denoised * scale_shift
 
       if args.debug and 'cmp envolope shift':
         plt.clf()
         plt.subplot(221) ; plt.title('0. x')       ; plt.plot(x)
-        plt.subplot(222) ; plt.title('2. y_final') ; plt.plot(x_denoised_shifted) ; plt.plot(z_upper) ; plt.plot(z_lower)
-        plt.subplot(224) ; plt.title('1. y')       ; plt.plot(x_norm_denoised)    ; plt.plot(y_upper) ; plt.plot(y_lower)
+        plt.subplot(222) ; plt.title('2. y_final') ; plt.plot(x_denoised_shifted) ; plt.plot(z_upper.cpu().numpy()) ; plt.plot(z_lower.cpu().numpy())
+        plt.subplot(224) ; plt.title('1. y')       ; plt.plot(x_norm_denoised)    ; plt.plot(y_upper.cpu().numpy()) ; plt.plot(y_lower.cpu().numpy())
         plt.suptitle('envolope shift')
         plt.show()
 
@@ -107,9 +119,9 @@ def infer(args):
         x_denoised_shifted = x_denoised_shifted[:lendict[name]]
 
       # save signal result
-      print(f'>> writing to {name}_C.txt')
+      #print(f'>> writing to {name}_C.txt')
       with zf.open(f'{name}_C.txt', 'w') as fh:
-        np.savetxt(fh, x_denoised_shifted)
+        np.savetxt(fh, x_denoised_shifted, fmt='%.16f')
 
   print(f'>> save to {fp_submit}')
 
