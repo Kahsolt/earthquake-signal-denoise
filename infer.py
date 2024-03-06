@@ -20,6 +20,69 @@ if 'configs':
   N_OVERLAP = int(N_OVERLAP)
 
 
+def griffinlim_hijack(
+  S:ndarray,
+  angles:ndarray,
+  n_iter=32,
+  hop_length=None,
+  win_length=None,
+  n_fft=None,
+  window="hann",
+  center=True,
+  dtype=None,
+  length=None,
+  pad_mode="constant",
+  momentum=0.9,
+):
+  from librosa.core.spectrum import griffinlim
+  from librosa import util
+
+  # using complex64 will keep the result to minimal necessary precision
+  eps = util.tiny(angles)
+
+  # And initialize the previous iterate to 0
+  rebuilt = 0.0
+  for _ in range(n_iter):
+    # Store the previous iterate
+    tprev = rebuilt
+    # Invert with our current estimate of the phases
+    inverse = L.istft(
+      S * angles,
+      hop_length=hop_length,
+      win_length=win_length,
+      n_fft=n_fft,
+      window=window,
+      center=center,
+      dtype=dtype,
+      length=length,
+    )
+    # Rebuild the spectrogram
+    rebuilt = L.stft(
+      inverse[:-1],
+      n_fft=n_fft,
+      hop_length=hop_length,
+      win_length=win_length,
+      window=window,
+      center=center,
+      pad_mode=pad_mode,
+    )
+    # Update our phase estimates
+    angles[:] = rebuilt - (momentum / (1 + momentum)) * tprev
+    angles[:] /= np.abs(angles) + eps
+
+  # Return the final phase estimates
+  return L.istft(
+    S * angles,
+    hop_length=hop_length,
+    win_length=win_length,
+    n_fft=n_fft,
+    window=window,
+    center=center,
+    dtype=dtype,
+    length=length,
+  )
+
+
 @torch.inference_mode()
 @timer
 def infer(args):
@@ -69,11 +132,14 @@ def infer(args):
       D = L.stft(x_norm[:-1], **FFT_PARAMS)
       M, P = L.spectrum.magphase(D, power=1)
       logM = np.clip(np.log(M + 1e-15), a_min=EPS, a_max=None)  # [F=65, L=750]
-      logM_low, logM_high = logM[:-1], logM[-1:]
+      logM_low, logM_high = logM[:-1], np.ones_like(logM[-1:]) * EPS    # suppress hifreq
       logM_low_denoised = denoise(logM_low)   # [F=64, L=750]
       logM_denoised = np.concatenate([logM_low_denoised, logM_high], axis=0)  # [F=65, L=750]
-      D_denoised = np.exp(logM_denoised) * P
-      x_norm_denoised: ndarray = L.istft(D_denoised, **FFT_PARAMS, length=len(x_norm))
+      if 'use Griffin-Lim':
+        x_norm_denoised: ndarray = griffinlim_hijack(logM_denoised, P, **FFT_PARAMS, length=len(x_norm))
+      else:
+        D_denoised = np.exp(logM_denoised) * P
+        x_norm_denoised: ndarray = L.istft(D_denoised, **FFT_PARAMS, length=len(x_norm))
 
       if args.debug and 'cmp spec denoise':
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
