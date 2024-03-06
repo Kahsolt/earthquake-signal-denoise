@@ -22,7 +22,6 @@ HOP_LEN_LIST = [e//2 for e in N_FFT_LIST]   # 4~512
 WIN_LEN_LIST = [e//2 for e in N_FFT_LIST]   # 4~512
 
 # defaults
-SPLIT   = 'train'
 N_FFT   = 128
 HOP_LEN = 32
 WIN_LEN = 128
@@ -55,7 +54,7 @@ class App:
     self.wnd = wnd
 
     # vars
-    self.var_split   = tk.StringVar(wnd, value=SPLIT)
+    self.var_split   = tk.StringVar(wnd, value=self.args.split)
     self.var_idx     = tk.IntVar(wnd, value=0)
     self.var_n_fft   = tk.IntVar(wnd, value=N_FFT)
     self.var_hop_len = tk.IntVar(wnd, value=HOP_LEN)
@@ -171,7 +170,8 @@ class App:
 if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('--fp', type=Path, help='submit file')
-  parser.add_argument('-T', choices=['', 'norm', 'log1p'], default='raw signal transform')
+  parser.add_argument('--split', choices=['train', 'test'], default='train', help='init dataset split')
+  parser.add_argument('-T', choices=['', 'norm', 'log1p'], help='raw signal transform')
   args = parser.parse_args()
 
   App(args)

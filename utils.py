@@ -84,11 +84,16 @@ def get_data_test_meta() -> Tuple[List[str], Dict[str, int]]:
     lendict = json.load(fh)
   return namelist, lendict
 
-def get_submit_pred_maybe(nlen:int) -> ndarray:
+@timer
+def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
   fp = fp or SUBMIT_PATH
-  if not fp.exists(): return [None] * nlen
-  # TODO: load & parse result.zip'
-  return np.loadtxt(fp, dtype=np.int32)
+  if not fp.exists():
+    print(f'>> warn: file {fp} not exits')
+    return [None] * nlen
+
+  from mk_data import process_zipfile
+  X, fns, lens = process_zipfile(fp)
+  return X
 
 
 def wav_log1p(x:ndarray) -> ndarray:
