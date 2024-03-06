@@ -2,8 +2,10 @@
 # Author: Armit
 # Create Time: 2024/02/01
 
+import json
 from pathlib import Path
 from time import time
+from datetime import datetime
 from typing import *
 
 import torch
@@ -29,11 +31,19 @@ SUBMIT_PATH = LOG_PATH / 'result.zip'
 
 NLEN = 24000  # 4min (1min before + 3min after)
 SR   = 100    # 100Hz
-N_SEG   = 4096    # in samples, N_FRAME = 4096/32 = 128
 N_FFT   = 128
 HOP_LEN = 32
 WIN_LEN = 128
+FFT_PARAMS = {
+  'n_fft': N_FFT, 
+  'hop_length': HOP_LEN, 
+  'win_length': WIN_LEN,
+}
+N_SEG   = 4096              # 4096, in samples
+N_FRAME = N_SEG // HOP_LEN  # 128, in frames
+N_SPEC  = N_FFT // 2 + 1    # 65, n_freq_band
 
+EPS = 1e-5
 SEED = 114514
 
 
@@ -45,6 +55,9 @@ def timer(fn):
     print(f'[Timer]: {fn.__name__} took {end - start:.3f}s')
     return r
   return wrapper
+
+def now_ts():   # 2024-03-06#15-58-36
+  return str(datetime.now()).split('.')[0].replace(' ', '#').replace(':', '-')
 
 def stat_tensor(x:Tensor, name:str='X'):
   print(f'[{name}] {x.shape}')
@@ -64,7 +77,14 @@ def get_data_test() -> ndarray:
   data = np.load(DATA_PATH / 'test.npz')
   return data['X']
 
-def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
+def get_data_test_meta() -> Tuple[List[str], Dict[str, int]]:
+  with open(DATA_PATH / 'test.txt', 'r', encoding='utf-8') as fh:
+    namelist = fh.read().strip().split('\n')
+  with open(DATA_PATH / 'test.json', 'r', encoding='utf-8') as fh:
+    lendict = json.load(fh)
+  return namelist, lendict
+
+def get_submit_pred_maybe(nlen:int) -> ndarray:
   fp = fp or SUBMIT_PATH
   if not fp.exists(): return [None] * nlen
   # TODO: load & parse result.zip'
@@ -88,9 +108,9 @@ def wav_norm(x:ndarray, C:float=5.0, remove_DC:bool=True) -> ndarray:
   return x
 
 
-def get_spec(y:ndarray, n_fft:int=256, hop_len:int=16, win_len:int=64) -> ndarray:
-  D = L.stft(y, n_fft=n_fft, hop_length=hop_len, win_length=win_len)
-  M = np.clip(np.log(np.abs(D) + 1e-15), a_min=1e-5, a_max=None)
+def get_spec(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> ndarray:
+  D = L.stft(y, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+  M = np.clip(np.log(np.abs(D) + 1e-15), a_min=EPS, a_max=None)
   return M
 
 

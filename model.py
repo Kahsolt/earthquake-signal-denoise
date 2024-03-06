@@ -207,9 +207,7 @@ if __name__ == '__main__':
   print(out.shape)  # [B, C=2, L]
 
   # spec -> denosied spec
-  N_SPEC = N_FFT // 2
-  N_FRAME = N_SEG // HOP_LEN
-  M = torch.rand([4, N_SPEC, N_FRAME])
+  M = torch.rand([4, N_SPEC-1, N_FRAME])
   denoiser = DenoiseModel()
   ids = torch.arange(N_FRAME).unsqueeze(dim=0).expand(M.shape[0], -1)
   out = denoiser(M, ids)

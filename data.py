@@ -13,50 +13,35 @@ def make_split(X:ndarray, Y:ndarray, split:str='train', ratio:float=0.1) -> List
   random.seed(SEED)
   random.shuffle(data)
   cp = int(len(data) * ratio)
-  if split == 'train': data = data[:-cp]
-  else:                data = data[-cp:]
-  return data
+  sdata = data[:-cp] if split == 'train' else data[-cp:]
+  return sdata
 
 
 class SignalDataset(Dataset):
 
   def __init__(self, split:str='train', transform:Callable=None, n_seg:int=-1, ratio:float=0.1):
-    self.split = split
     self.n_seg = n_seg
+    self.id_rng = None
 
-    if self.is_train:
-      X, Y = get_data_train()
-      if transform:
-        X = transform(X)
-        Y = transform(Y)
-      self.data = make_split(X, Y, split, ratio)
-    else:
-      X = get_data_test()
-      if transform: X = transform(X)
-      self.data = X
-
-  @property
-  def is_train(self):
-    return self.split in ['train', 'valid']
+    X, Y = get_data_train()
+    if transform:
+      X = transform(X)
+      Y = transform(Y)
+    self.data = make_split(X, Y, split, ratio)
 
   def __len__(self):
     return len(self.data)
 
-  def __getitem__(self, idx):
-    if self.is_train:
-      X, Y = self.data[idx]
-      if self.n_seg > 0:
-        cp = random.randrange(len(X) - self.n_seg)
-        self.id_rng = [cp, cp + self.n_seg]
-        slicer = slice(*self.id_rng)
-        X, Y = X[slicer], Y[slicer]
-      else:
-        self.id_rng = [0, len(X)]
-      return [np.expand_dims(e, axis=0) for e in [X, Y]]
+  def __getitem__(self, idx) -> Tuple[ndarray, ndarray]:
+    X, Y = self.data[idx]
+    if self.n_seg > 0:
+      cp = random.randrange(len(X) - self.n_seg)
+      self.id_rng = [cp, cp + self.n_seg]
+      slicer = slice(*self.id_rng)
+      X, Y = X[slicer], Y[slicer]
     else:
-      X = self.data[idx]
       self.id_rng = [0, len(X)]
-      return np.expand_dims(X, axis=0)
+    return [np.expand_dims(e, axis=0) for e in [X, Y]]
 
 
 class SpecDataset(SignalDataset):
@@ -64,23 +49,18 @@ class SpecDataset(SignalDataset):
   def __init__(self, split:str='train', transform:Callable=None, n_seg:int=N_SEG, ratio:float=0.1):
     super().__init__(split, transform, n_seg, ratio)
 
-    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], N_FFT, HOP_LEN, WIN_LEN)[:-1, :]   # ignore last band (hifreq ~1e-5)
+    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], **FFT_PARAMS)[:-1]   # ignore last band (hifreq ~1e-5)
 
   @property
   def id_rng_spec(self) -> Tuple[int]:
     x, y = self.id_rng
     return x // HOP_LEN, y // HOP_LEN
 
-  def __getitem__(self, idx):
-    if self.is_train:
-      X, Y = super().__getitem__(idx)
-      MX = self.get_spec_(X)   # [F=64, L=128]
-      MY = self.get_spec_(Y)
-      return MX, MY, torch.arange(*self.id_rng_spec)
-    else:
-      X = super().__getitem__(idx)
-      MX = self.get_spec_(X)
-      return MX, torch.arange(*self.id_rng_spec)
+  def __getitem__(self, idx) -> Tuple[ndarray, ndarray, ndarray]:
+    X, Y = super().__getitem__(idx)
+    MX = self.get_spec_(X)   # [F=64, L=128]
+    MY = self.get_spec_(Y)
+    return MX, MY, np.arange(*self.id_rng_spec)
 
 
 if __name__ == '__main__':

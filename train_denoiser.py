@@ -51,10 +51,6 @@ class LitModel(LightningModule):
 
   def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tuple[Tensor, Dict[str, float]]:
     x, y, ids = batch
-    x = x.float()
-    y = y.float()
-    ids = ids.long()
-
     output = self.model(x, ids)
     loss = F.l1_loss(output, y)
 
