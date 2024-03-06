@@ -2,6 +2,8 @@
 # Author: Armit
 # Create Time: 2024/03/06
 
+import os
+from copy import deepcopy
 from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
@@ -126,20 +128,33 @@ def infer(args):
 
   fp_submit = SUBMIT_PATH.parent / (SUBMIT_PATH.stem + f'_{now_ts()}' + SUBMIT_PATH.suffix)
   with ZipFile(fp_submit, 'w', compression=ZIP_DEFLATED, compresslevel=9) as zf:
-    for name, x in tqdm(zip(namelist, X)):
+    for name, x in tqdm(zip(namelist, X), total=len(namelist)):
       # norm domain: noisy signal -> (stft) -> sliced denoise -> (istft) -> denoised signal
       x_norm = wav_norm(x)
       D = L.stft(x_norm[:-1], **FFT_PARAMS)
       M, P = L.spectrum.magphase(D, power=1)
       logM = np.clip(np.log(M + 1e-15), a_min=EPS, a_max=None)  # [F=65, L=750]
-      logM_low, logM_high = logM[:-1], np.ones_like(logM[-1:]) * EPS    # suppress hifreq
-      logM_low_denoised = denoise(logM_low)   # [F=64, L=750]
-      logM_denoised = np.concatenate([logM_low_denoised, logM_high], axis=0)  # [F=65, L=750]
-      if 'use Griffin-Lim':
-        x_norm_denoised: ndarray = griffinlim_hijack(logM_denoised, P, **FFT_PARAMS, length=len(x_norm))
-      else:
-        D_denoised = np.exp(logM_denoised) * P
-        x_norm_denoised: ndarray = L.istft(D_denoised, **FFT_PARAMS, length=len(x_norm))
+
+      # denoise
+      sel = 0
+      if sel == 0:
+        logM_low, logM_high = logM[:-1], np.ones_like(logM[-1:]) * EPS    # suppress hifreq
+        logM_low_denoised = denoise(logM_low)   # [F=64, L=750]
+        logM_denoised = np.concatenate([logM_low_denoised, logM_high], axis=0)  # [F=65, L=750]
+      elif sel == 1:
+        logM_denoised = deepcopy(logM)
+        logM_denoised[:2, :] = EPS
+      M_denoised = np.exp(logM_denoised)
+
+      # inv_wav
+      sel = 1
+      if sel == 0:
+        x_norm_denoised: ndarray = L.griffinlim(M_denoised, **FFT_PARAMS, length=len(x_norm)-1)
+        x_norm_denoised = np.pad(x_norm_denoised, (0, 1), mode='reflect')
+      elif sel == 1:
+        x_norm_denoised: ndarray = griffinlim_hijack(M_denoised, P, **FFT_PARAMS, length=len(x_norm))
+      elif sel == 2:
+        x_norm_denoised: ndarray = L.istft(M_denoised * P, **FFT_PARAMS, length=len(x_norm))
 
       if args.debug and 'cmp spec denoise':
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
@@ -187,7 +202,7 @@ def infer(args):
       # save signal result
       #print(f'>> writing to {name}_C.txt')
       with zf.open(f'{name}_C.txt', 'w') as fh:
-        np.savetxt(fh, x_denoised_shifted, fmt='%.16f')
+        np.savetxt(fh, x_denoised_shifted, fmt='%.6f')
 
   print(f'>> save to {fp_submit}')
 
@@ -198,5 +213,7 @@ if __name__ == '__main__':
   parser.add_argument('--load_E', required=True, type=Path, help='pretrained envolope ckpt')
   parser.add_argument('--debug', action='store_true', help='plot debug results')
   args = parser.parse_args()
+
+  args.debug = args.debug or os.getenv('DEBUG_INFER', False)
 
   infer(args)

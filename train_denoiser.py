@@ -49,8 +49,24 @@ class LitModel(LightningModule):
     if batch_idx % 10 == 0:
       self.log_dict({f'lr/{i}': group['lr'] for i, group in enumerate(optim.param_groups)})
 
-  def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tuple[Tensor, Dict[str, float]]:
+  def on_after_backward(self):
+    found_nan_or_inf = False
+    for param in self.parameters():
+      if not found_nan_or_inf: break
+      if param.grad is not None:
+        found_nan_or_inf = torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
+    if found_nan_or_inf:
+      self.zero_grad()
+      print(f'>> detected inf or nan values in gradients. not updating model parameters')
+      breakpoint()
+
+  def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tensor:
     x, y, ids = batch
+    self.x, self.y, self.ids = x, y, ids    # debug gradient NaN
+    if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
+      print(f'>> detected inf or nan values in inputs')
+      breakpoint()
+
     output = self.model(x, ids)
     loss = F.l1_loss(output, y)
 

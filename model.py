@@ -14,7 +14,7 @@ remove_weight_norm = lambda mod: remove_parametrizations(mod, 'weight')
 
 from utils import *
 
-DEBUG_SHAPE = os.getenv('', False)
+DEBUG_SHAPE = os.getenv('DEBUG_SHAPE', False)
 
 
 def init_weights(m:nn.Conv2d, mean:float=0.0, std:float=0.01):
@@ -116,7 +116,7 @@ class EnvolopeExtractor(nn.Module):
     return torch.cat([upper, lower], dim=1)
 
 
-act = F.relu_
+act = lambda x: F.leaky_relu_(x, negative_slope=0.02)
 
 
 class ResBlock(nn.Module):
@@ -172,11 +172,11 @@ class DenoiseModel(nn.Module):
     self.posenc = nn.Embedding(NLEN//HOP_LEN, embed_dim)
 
     # x8 downsample: [1+embed_dim, 64, 128] => [256, 8, 16] => [1, 64, 128]
-    self.pre_conv = weight_norm(nn.Conv2d(1+embed_dim, 32, kernel_size=7, padding=3))
+    self.pre_conv = weight_norm(nn.Conv2d(1+embed_dim, 16, kernel_size=7, padding=3))
     self.downs = nn.ModuleList([
-      weight_norm(nn.Conv2d( 32,  64, kernel_size=4, stride=2, groups=4, padding=get_padding_strided(4))),
-      weight_norm(nn.Conv2d( 64, 128, kernel_size=4, stride=2, groups=8, padding=get_padding_strided(4))),
-      weight_norm(nn.Conv2d(128, 256, kernel_size=4, stride=2, groups=16, padding=get_padding_strided(4))),
+      weight_norm(nn.Conv2d(16,  32, kernel_size=4, stride=2, groups=4,  padding=get_padding_strided(4))),
+      weight_norm(nn.Conv2d(32,  64, kernel_size=4, stride=2, groups=8,  padding=get_padding_strided(4))),
+      weight_norm(nn.Conv2d(64, 128, kernel_size=4, stride=2, groups=16, padding=get_padding_strided(4))),
     ])
     self.downs_resblocks = nn.ModuleList([
       ResBlock(32),
@@ -184,14 +184,14 @@ class DenoiseModel(nn.Module):
       ResBlock(128),
     ])
     self.mid = nn.ModuleList([
-      weight_norm(nn.Conv2d(256, 256, kernel_size=1)),
+      weight_norm(nn.Conv2d(128, 256, kernel_size=1)),
       GatedActivation(256, k=7),
-      weight_norm(nn.Conv2d(256, 256, kernel_size=1, groups=32)),
+      weight_norm(nn.Conv2d(256, 128, kernel_size=1, groups=16)),
     ])
     self.ups = nn.ModuleList([
-      weight_norm(nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, groups=32, padding=get_padding_strided(4))),
-      weight_norm(nn.ConvTranspose2d(128,  64, kernel_size=4, stride=2, groups=16, padding=get_padding_strided(4))),
-      weight_norm(nn.ConvTranspose2d( 64,  32, kernel_size=4, stride=2, groups=8,  padding=get_padding_strided(4))),
+      weight_norm(nn.ConvTranspose2d(128+128, 128, kernel_size=4, stride=2, padding=get_padding_strided(4))),
+      weight_norm(nn.ConvTranspose2d(128+ 64,  64, kernel_size=4, stride=2, padding=get_padding_strided(4))),
+      weight_norm(nn.ConvTranspose2d( 64+ 32,  32, kernel_size=4, stride=2, padding=get_padding_strided(4))),
     ])
     self.ups_resblocks = nn.ModuleList([
       ResBlock(128),
@@ -212,26 +212,31 @@ class DenoiseModel(nn.Module):
 
     pe: Tensor = self.posenc(ids)   # [B, L=128, D=32]
     if DEBUG_SHAPE: print('pe:', pe.shape)
-    pe_ex = pe.swapaxes(1, 2).unsqueeze(dim=-2).expand(-1, -1, x.shape[-2], -1)
+    pe_ex = pe.swapaxes(1, 2).unsqueeze(dim=-2).expand(-1, -1, x.shape[-2], -1)   # expand index `F`
     if DEBUG_SHAPE: print('pe_ex:', pe_ex.shape)
     x = torch.cat([x.unsqueeze(dim=1), pe_ex], dim=1)
     if DEBUG_SHAPE: print('x_cat:', x.shape)
 
     x = self.pre_conv(x)
     if DEBUG_SHAPE: print('pre_conv:', x.shape)
+    hs = []
     for i, layer in enumerate(self.downs):
       x = act(x)
       x = layer(x)
+      hs.append(x)
       if DEBUG_SHAPE: print(f'downs-{i}:', x.shape)
       x = self.downs_resblocks[i](x)
       if DEBUG_SHAPE: print(f'downs_rblk-{i}:', x.shape)
-    x = act(x)
     for i, layer in enumerate(self.mid):
-      x = layer(x)
-      if DEBUG_SHAPE: print(f'ini-{i}:', x.shape)
-    for i, layer in enumerate(self.ups):
       x = act(x)
       x = layer(x)
+      if DEBUG_SHAPE: print(f'mid-{i}:', x.shape)
+    for i, layer in enumerate(self.ups):
+      x = act(x)
+      h = hs[len(self.downs) - 1 - i]
+      fused = torch.cat([x, h], dim=1)
+      if DEBUG_SHAPE: print(f'fused-{i}:', fused.shape)
+      x = layer(fused)
       if DEBUG_SHAPE: print(f'ups-{i}:', x.shape)
       x = self.ups_resblocks[i](x)
       if DEBUG_SHAPE: print(f'ups_rblk-{i}:', x.shape)
