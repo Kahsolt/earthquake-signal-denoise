@@ -2,6 +2,8 @@
 # Author: Armit
 # Create Time: 2024/02/20  
 
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,9 +14,19 @@ remove_weight_norm = lambda mod: remove_parametrizations(mod, 'weight')
 
 from utils import *
 
+DEBUG_SHAPE = os.getenv('', False)
 
-def get_padding(kernel_size:int, stride:int=2):
+
+def init_weights(m:nn.Conv2d, mean:float=0.0, std:float=0.01):
+  classname = m.__class__.__name__
+  if 'Conv' in classname:
+    m.weight.data.normal_(mean, std)
+
+def get_padding_strided(kernel_size:int, stride:int=2):
   return (kernel_size - stride) // 2
+
+def get_padding_dilated(kernel_size:int, dilation:int=1):
+  return int((kernel_size * dilation - dilation) / 2)
 
 
 class EnvolopeModel(nn.Module):
@@ -24,47 +36,53 @@ class EnvolopeModel(nn.Module):
   def __init__(self):
     super().__init__()
 
-    # x192 downsample: 24000 => 125
-    self.pre_conv = weight_norm(nn.Conv1d(1, 8, kernel_size=41, padding=20))
+    # x192 downsample: [24000] => [125]
+    self.pre_conv = weight_norm(nn.Conv1d(1, 16, kernel_size=41, padding=20))
     self.downs = nn.ModuleList([
-      weight_norm(nn.Conv1d( 8,  32, kernel_size=16, stride=8, groups=4,  padding=get_padding(16, 8))),
-      weight_norm(nn.Conv1d(32,  64, kernel_size=12, stride=6, groups=16, padding=get_padding(12, 6))),
-      weight_norm(nn.Conv1d(64, 128, kernel_size=8,  stride=4, groups=32, padding=get_padding(8,  4))),
+      weight_norm(nn.Conv1d(16,  32, kernel_size=16, stride=8, groups=4,  padding=get_padding_strided(16, 8))),
+      weight_norm(nn.Conv1d(32,  64, kernel_size=12, stride=6, groups=8,  padding=get_padding_strided(12, 6))),
+      weight_norm(nn.Conv1d(64, 128, kernel_size=8,  stride=4, groups=16, padding=get_padding_strided(8,  4))),
     ])
     self.ini = nn.ModuleList([
-      weight_norm(nn.Conv1d(128, 128, kernel_size=1)),
+      weight_norm(nn.Conv1d(128, 128, kernel_size=1, groups=16)),
       weight_norm(nn.Conv1d(128, 128, kernel_size=1, groups=16)),
     ])
     self.ups = nn.ModuleList([
-      weight_norm(nn.ConvTranspose1d(128*2, 64, kernel_size=8,  stride=4, padding=get_padding(8,  4))),
-      weight_norm(nn.ConvTranspose1d( 64*2, 32, kernel_size=12, stride=6, padding=get_padding(12, 6))),
-      weight_norm(nn.ConvTranspose1d( 32*2, 16, kernel_size=16, stride=8, padding=get_padding(16, 8))),
+      weight_norm(nn.ConvTranspose1d(128*2, 64, kernel_size=8,  stride=4, groups=16, padding=get_padding_strided(8,  4))),
+      weight_norm(nn.ConvTranspose1d( 64*2, 32, kernel_size=12, stride=6, groups=8,  padding=get_padding_strided(12, 6))),
+      weight_norm(nn.ConvTranspose1d( 32*2, 16, kernel_size=16, stride=8, groups=4,  padding=get_padding_strided(16, 8))),
     ])
     self.post_conv = weight_norm(nn.Conv1d(16, 2, kernel_size=41, padding=20))
 
+    self.pre_conv.apply(init_weights)
+    self.downs.apply(init_weights)
+    self.ini.apply(init_weights)
+    self.ups.apply(init_weights)
+    self.post_conv.apply(init_weights)
+
   def forward(self, x:Tensor) -> Tensor:
-    DEBUG_SHAPE = False
+    act = F.relu_   # better than leaky_relu, relu6, silu, mish
 
     x = self.pre_conv(x)      # [B, D=1, L=24000]
     if DEBUG_SHAPE: print('pre_conv:', x.shape)
     hs = []
     for i, layer in enumerate(self.downs):
-      x = F.relu(x)
+      x = act(x)
       x = layer(x)
       if DEBUG_SHAPE: print(f'downs-[{i}]:', x.shape)
       hs.append(x)
     for i, layer in enumerate(self.ini):
-      x = F.relu(x)
+      x = act(x)
       x = layer(x)
       if DEBUG_SHAPE: print(f'ini-[{i}]:', x.shape)
     for i, layer in enumerate(self.ups):
-      x = F.relu(x)
+      x = act(x)
       h = hs[len(self.ups) - 1 - i]
       fused = torch.cat([x, h], dim=1)
       if DEBUG_SHAPE: print(f'fused-[{i}]:', x.shape)
       x = layer(fused)
       if DEBUG_SHAPE: print(f'ups-[{i}]:', x.shape)
-    x = F.tanh(x)
+    x = act(x)
     x = self.post_conv(x)
     if DEBUG_SHAPE: print(f'post_conv:', x.shape)
     return x
@@ -98,31 +116,40 @@ class EnvolopeExtractor(nn.Module):
     return torch.cat([upper, lower], dim=1)
 
 
+act = F.relu_
+
+
 class ResBlock(nn.Module):
 
-  def __init__(self, dim:int, ks:List[int]=[3, 1]):
+  ''' alike HiFiGAN ResBlock2 '''
+
+  def __init__(self, ch:int, k:int=3, dilation:Tuple[int]=(1, 3)):
     super().__init__()
 
-    self.convs = nn.ModuleList([weight_norm(nn.Conv2d(dim, dim, kernel_size=k, padding=k//2)) for k in ks])
+    self.convs = nn.ModuleList([
+      weight_norm(nn.Conv2d(ch, ch, k, dilation=dilation[0], padding=get_padding_dilated(k, dilation[0]))),
+      weight_norm(nn.Conv2d(ch, ch, k, dilation=dilation[1], padding=get_padding_dilated(k, dilation[1]))),
+    ])
+    self.convs.apply(init_weights)
 
   def forward(self, x:Tensor) -> Tensor:
-    r = x
-    for conv in self.convs:
-      o = F.leaky_relu(x)
-      o = conv(o)
-      x = x + o
-    return x + r
+    for c in self.convs:
+      xt = act(x)
+      xt = c(xt)
+      x = xt + x
+    return x
 
   def remove_weight_norm(self):
-    for conv in self.convs: remove_weight_norm(conv)
+    for l in self.convs: remove_weight_norm(l)
 
 
 class GatedActivation(nn.Module):
 
-  def __init__(self, dim:int, k:int=5):
+  def __init__(self, ch:int, k:int=5):
     super().__init__()
 
-    self.conv = weight_norm(nn.Conv2d(dim, dim*2, kernel_size=k, padding=k//2))
+    self.conv = weight_norm(nn.Conv2d(ch, ch*2, k, padding=k//2))
+    self.conv.apply(init_weights)
 
   def forward(self, x:Tensor) -> Tensor:
     o = self.conv(x)
@@ -135,7 +162,7 @@ class GatedActivation(nn.Module):
 
 class DenoiseModel(nn.Module):
 
-  ''' spectrogram -> denoised spectrogram '''
+  ''' alike HiFiGAN Generator: spectrogram -> denoised spectrogram '''
 
   def __init__(self):
     super().__init__()
@@ -147,38 +174,39 @@ class DenoiseModel(nn.Module):
     # x8 downsample: [1+embed_dim, 64, 128] => [256, 8, 16] => [1, 64, 128]
     self.pre_conv = weight_norm(nn.Conv2d(1+embed_dim, 32, kernel_size=7, padding=3))
     self.downs = nn.ModuleList([
-      ResBlock(32),
-      nn.LeakyReLU(),
-      weight_norm(nn.Conv2d( 32,  64, kernel_size=4, stride=2, groups=2, padding=get_padding(4))),
-      ResBlock(64),
-      nn.LeakyReLU(),
-      weight_norm(nn.Conv2d( 64, 128, kernel_size=4, stride=2, groups=4, padding=get_padding(4))),
-      ResBlock(128),
-      nn.LeakyReLU(),
-      weight_norm(nn.Conv2d(128, 256, kernel_size=4, stride=2, groups=8, padding=get_padding(4))),
+      weight_norm(nn.Conv2d( 32,  64, kernel_size=4, stride=2, groups=4, padding=get_padding_strided(4))),
+      weight_norm(nn.Conv2d( 64, 128, kernel_size=4, stride=2, groups=8, padding=get_padding_strided(4))),
+      weight_norm(nn.Conv2d(128, 256, kernel_size=4, stride=2, groups=16, padding=get_padding_strided(4))),
     ])
-    self.ini = nn.ModuleList([
-      nn.LeakyReLU(),
+    self.downs_resblocks = nn.ModuleList([
+      ResBlock(32),
+      ResBlock(64),
+      ResBlock(128),
+    ])
+    self.mid = nn.ModuleList([
       weight_norm(nn.Conv2d(256, 256, kernel_size=1)),
-      GatedActivation(256, k=5),
-      weight_norm(nn.Conv2d(256, 256, kernel_size=1, groups=16)),
+      GatedActivation(256, k=7),
+      weight_norm(nn.Conv2d(256, 256, kernel_size=1, groups=32)),
     ])
     self.ups = nn.ModuleList([
-      ResBlock(256),
-      nn.LeakyReLU(),
-      weight_norm(nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=get_padding(4))),
+      weight_norm(nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, groups=32, padding=get_padding_strided(4))),
+      weight_norm(nn.ConvTranspose2d(128,  64, kernel_size=4, stride=2, groups=16, padding=get_padding_strided(4))),
+      weight_norm(nn.ConvTranspose2d( 64,  32, kernel_size=4, stride=2, groups=8,  padding=get_padding_strided(4))),
+    ])
+    self.ups_resblocks = nn.ModuleList([
       ResBlock(128),
-      nn.LeakyReLU(),
-      weight_norm(nn.ConvTranspose2d(128,  64, kernel_size=4, stride=2, padding=get_padding(4))),
       ResBlock(64),
-      nn.LeakyReLU(),
-      weight_norm(nn.ConvTranspose2d( 64,  32, kernel_size=4, stride=2, padding=get_padding(4))),
+      ResBlock(32),
     ])
     self.post_conv = weight_norm(nn.Conv2d(32, 1, kernel_size=7, padding=3))
 
-  def forward(self, x:Tensor, ids:Tensor) -> Tensor:
-    DEBUG_SHAPE = False
+    self.pre_conv.apply(init_weights)
+    self.downs.apply(init_weights)
+    self.mid.apply(init_weights)
+    self.ups.apply(init_weights)
+    self.post_conv.apply(init_weights)
 
+  def forward(self, x:Tensor, ids:Tensor) -> Tensor:
     if DEBUG_SHAPE: print('x:', x.shape)      # [B, F=65, L=128]
     if DEBUG_SHAPE: print('ids:', ids.shape)  # [B, L]
 
@@ -192,15 +220,22 @@ class DenoiseModel(nn.Module):
     x = self.pre_conv(x)
     if DEBUG_SHAPE: print('pre_conv:', x.shape)
     for i, layer in enumerate(self.downs):
+      x = act(x)
       x = layer(x)
       if DEBUG_SHAPE: print(f'downs-{i}:', x.shape)
-    for i, layer in enumerate(self.ini):
+      x = self.downs_resblocks[i](x)
+      if DEBUG_SHAPE: print(f'downs_rblk-{i}:', x.shape)
+    x = act(x)
+    for i, layer in enumerate(self.mid):
       x = layer(x)
       if DEBUG_SHAPE: print(f'ini-{i}:', x.shape)
     for i, layer in enumerate(self.ups):
+      x = act(x)
       x = layer(x)
       if DEBUG_SHAPE: print(f'ups-{i}:', x.shape)
-    x = F.leaky_relu(x)
+      x = self.ups_resblocks[i](x)
+      if DEBUG_SHAPE: print(f'ups_rblk-{i}:', x.shape)
+    x = act(x)
     x = self.post_conv(x)
     if DEBUG_SHAPE: print('post_conv:', x.shape)
 
@@ -215,7 +250,7 @@ class DenoiseModel(nn.Module):
         layer.remove_weight_norm()
       elif isinstance(layer, nn.Conv2d):
         remove_weight_norm(layer)
-    for layer in self.ini:
+    for layer in self.mid:
       if isinstance(layer, GatedActivation):
         layer.remove_weight_norm()
       elif isinstance(layer, nn.Conv2d):

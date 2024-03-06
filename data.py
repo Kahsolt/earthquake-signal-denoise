@@ -8,26 +8,23 @@ from torch.utils.data import Dataset, DataLoader
 from utils import *
 
 
-def make_split(X:ndarray, Y:ndarray, split:str='train', ratio:float=0.1) -> List[Tuple[ndarray, int]]:
+def make_split(X:ndarray, Y:ndarray, ratio:float=0.1) -> Tuple[List[Tuple[ndarray, ndarray]]]:
   data = [(x, y) for x, y in zip(X, Y)]
   random.seed(SEED)
   random.shuffle(data)
   cp = int(len(data) * ratio)
-  sdata = data[:-cp] if split == 'train' else data[-cp:]
-  return sdata
+  return data[:-cp], data[-cp:]
 
 
 class SignalDataset(Dataset):
 
-  def __init__(self, split:str='train', transform:Callable=None, n_seg:int=-1, ratio:float=0.1):
+  def __init__(self, XY:List[Tuple[ndarray, ndarray]], transform:Callable=None, n_seg:int=-1, ratio:float=0.1):
     self.n_seg = n_seg
     self.id_rng = None
 
-    X, Y = get_data_train()
     if transform:
-      X = transform(X)
-      Y = transform(Y)
-    self.data = make_split(X, Y, split, ratio)
+      XY = [(transform(x), transform(y)) for x, y in XY]
+    self.data = XY
 
   def __len__(self):
     return len(self.data)
@@ -46,8 +43,8 @@ class SignalDataset(Dataset):
 
 class SpecDataset(SignalDataset):
 
-  def __init__(self, split:str='train', transform:Callable=None, n_seg:int=N_SEG, ratio:float=0.1):
-    super().__init__(split, transform, n_seg, ratio)
+  def __init__(self, XY:List[Tuple[ndarray]], transform:Callable=None, n_seg:int=N_SEG, ratio:float=0.1):
+    super().__init__(XY, transform, n_seg, ratio)
 
     self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], **FFT_PARAMS)[:-1]   # ignore last band (hifreq ~1e-5)
 

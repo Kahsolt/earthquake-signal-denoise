@@ -10,7 +10,7 @@ from torch.optim import Optimizer, SGD, Adam
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
-from data import SpecDataset, DataLoader
+from data import SpecDataset, DataLoader, make_split
 from model import DenoiseModel
 from utils import *
 
@@ -83,8 +83,10 @@ def train(args):
     'persistent_workers': False,
     'pin_memory': True,
   }
-  trainloader = DataLoader(SpecDataset('train', transform=wav_norm), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SpecDataset('valid', transform=wav_norm), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  X, Y = get_data_train()
+  trainset, validset = make_split(X, Y, ratio=0.1)
+  trainloader = DataLoader(SpecDataset(trainset, transform=wav_norm), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SpecDataset(validset, transform=wav_norm), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = DenoiseModel()

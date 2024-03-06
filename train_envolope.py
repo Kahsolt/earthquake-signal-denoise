@@ -10,7 +10,7 @@ from torch.optim import Optimizer, SGD, Adam
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
-from data import SignalDataset, DataLoader
+from data import SignalDataset, DataLoader, make_split
 from model import EnvolopeModel, EnvolopeExtractor
 from utils import *
 
@@ -54,7 +54,7 @@ class LitModel(LightningModule):
     x, y = batch
     output = self.model(x)
     envolope = self.envolope_extractor(y)
-    loss = F.mse_loss(output, envolope)
+    loss = F.huber_loss(output, envolope)   # better than mse_loss
 
     if prefix == 'train':
       self.train_mae(output, envolope)
@@ -85,8 +85,10 @@ def train(args):
     'persistent_workers': False,
     'pin_memory': True,
   }
-  trainloader = DataLoader(SignalDataset('train', transform=wav_log1p), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SignalDataset('valid', transform=wav_log1p), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  X, Y = get_data_train()
+  trainset, validset = make_split(X, Y, ratio=0.1)
+  trainloader = DataLoader(SignalDataset(trainset, transform=wav_log1p), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SignalDataset(validset, transform=wav_log1p), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = EnvolopeModel()
