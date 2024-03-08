@@ -166,35 +166,39 @@ def infer(args):
         plt.suptitle('infer denoise model')
         plt.show()
 
-      # log1p domain: noisy signal -> denoised envolope
-      x_lop1p: ndarray = wav_log1p(x)
-      z_lop1p_upper, z_lop1p_lower = model_E(torch.from_numpy(x_lop1p).to(device).unsqueeze(0).unsqueeze(0))[0]
-      z_upper, z_lower = torch.expm1(z_lop1p_upper), -torch.expm1(-z_lop1p_lower)
+      if not 'shift envolope':
+        # log1p domain: noisy signal -> denoised envolope
+        x_lop1p: ndarray = wav_log1p(x)
+        z_lop1p_upper, z_lop1p_lower = model_E(torch.from_numpy(x_lop1p).to(device).unsqueeze(0).unsqueeze(0))[0]
+        z_upper, z_lower = torch.expm1(z_lop1p_upper), -torch.expm1(-z_lop1p_lower)
 
-      if args.debug and 'cmp envolope mapping':
-        plt.clf()
-        plt.subplot(221) ; plt.title('1. x')                ; plt.plot(x)
-        plt.subplot(222) ; plt.title('2. x_log1p')          ; plt.plot(x_lop1p)
-        plt.subplot(223) ; plt.title('4. target env')       ; plt.plot(z_upper      .cpu().numpy()) ; plt.plot(z_lower      .cpu().numpy())
-        plt.subplot(224) ; plt.title('3. target env_log1p') ; plt.plot(z_lop1p_upper.cpu().numpy()) ; plt.plot(z_lop1p_lower.cpu().numpy())
-        plt.suptitle('infer envolope model')
-        plt.show()
+        if args.debug and 'cmp envolope mapping':
+          plt.clf()
+          plt.subplot(221) ; plt.title('1. x')                ; plt.plot(x)
+          plt.subplot(222) ; plt.title('2. x_log1p')          ; plt.plot(x_lop1p)
+          plt.subplot(223) ; plt.title('4. target env')       ; plt.plot(z_upper      .cpu().numpy()) ; plt.plot(z_lower      .cpu().numpy())
+          plt.subplot(224) ; plt.title('3. target env_log1p') ; plt.plot(z_lop1p_upper.cpu().numpy()) ; plt.plot(z_lop1p_lower.cpu().numpy())
+          plt.suptitle('infer envolope model')
+          plt.show()
 
-      # shift predicted `x_norm_denoised` to predicted envolope of `[z_upper, z_lower]`
-      y_upper, y_lower = envolope_extractor(torch.from_numpy(x_norm_denoised).to(device).unsqueeze(0).unsqueeze(0))[0]
-      upper_scale_shift = torch.mean(z_upper / y_upper)
-      lower_scale_shift = torch.mean(z_lower / y_lower)
-      scale_shift: float = ((upper_scale_shift + lower_scale_shift) / 2).item()
-      x_denoised_shifted: ndarray = x_norm_denoised * scale_shift
+        # shift predicted `x_norm_denoised` to predicted envolope of `[z_upper, z_lower]`
+        y_upper, y_lower = envolope_extractor(torch.from_numpy(x_norm_denoised).to(device).unsqueeze(0).unsqueeze(0))[0]
+        upper_scale_shift = torch.mean(z_upper / y_upper)
+        lower_scale_shift = torch.mean(z_lower / y_lower)
+        scale_shift: float = ((upper_scale_shift + lower_scale_shift) / 2).item()
+        x_denoised_shifted: ndarray = x_norm_denoised * scale_shift
 
-      if args.debug and 'cmp envolope shift':
-        plt.clf()
-        plt.subplot(221) ; plt.title('0. x')       ; plt.plot(x)
-        plt.subplot(222) ; plt.title('2. y_final') ; plt.plot(x_denoised_shifted) ; plt.plot(z_upper.cpu().numpy()) ; plt.plot(z_lower.cpu().numpy())
-        plt.subplot(224) ; plt.title('1. y')       ; plt.plot(x_norm_denoised)    ; plt.plot(y_upper.cpu().numpy()) ; plt.plot(y_lower.cpu().numpy())
-        plt.suptitle('envolope shift')
-        plt.show()
+        if args.debug and 'cmp envolope shift':
+          plt.clf()
+          plt.subplot(221) ; plt.title('0. x')       ; plt.plot(x)
+          plt.subplot(222) ; plt.title('2. y_final') ; plt.plot(x_denoised_shifted) ; plt.plot(z_upper.cpu().numpy()) ; plt.plot(z_lower.cpu().numpy())
+          plt.subplot(224) ; plt.title('1. y')       ; plt.plot(x_norm_denoised)    ; plt.plot(y_upper.cpu().numpy()) ; plt.plot(y_lower.cpu().numpy())
+          plt.suptitle('envolope shift')
+          plt.show()
 
+      else:
+        x_denoised_shifted = x_norm_denoised
+  
       # truncate length
       if name in lendict:
         x_denoised_shifted = x_denoised_shifted[:lendict[name]]
