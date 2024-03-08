@@ -11,7 +11,7 @@ from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
 from data import SignalDataset, DataLoader, make_split
-from model import EnvolopeModel, EnvolopeExtractor
+from models import EnvolopeModel, EnvolopeExtractor
 from utils import *
 
 

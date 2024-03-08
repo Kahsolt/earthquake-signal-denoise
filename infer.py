@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 
 from train_denoiser import LitModel as DenoiserLitModel
 from train_envolope import LitModel as EnvolopeLitModel
-from model import DenoiseModel, EnvolopeModel, EnvolopeExtractor
+from models import DenoiseModel, EnvolopeModel, EnvolopeExtractor
 from utils import *
 
 

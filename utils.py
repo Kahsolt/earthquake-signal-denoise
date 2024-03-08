@@ -2,6 +2,7 @@
 # Author: Armit
 # Create Time: 2024/02/01
 
+import os
 import json
 from pathlib import Path
 from time import time
@@ -19,6 +20,8 @@ import librosa as L
 import librosa.display as LD
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+
+DEBUG_SHAPE = os.getenv('DEBUG_SHAPE', False)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

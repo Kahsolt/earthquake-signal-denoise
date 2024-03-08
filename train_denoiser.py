@@ -11,7 +11,7 @@ from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
 from data import SpecDataset, DataLoader, make_split
-from model import DenoiseModel
+from models import DenoiseModel
 from utils import *
 
 

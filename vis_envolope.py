@@ -4,7 +4,7 @@
 
 from argparse import ArgumentParser
 
-from model import EnvolopeExtractor
+from models import EnvolopeExtractor
 from utils import *
 
 
