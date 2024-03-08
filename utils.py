@@ -119,15 +119,21 @@ def get_spec(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> 
   return M
 
 
-def signal_noise_ratio(y_hat:ndarray, y:ndarray):
+def signal_noise_ratio(y_hat:ndarray, y:ndarray) -> float:
   ''' 信噪比对数值缩放敏感 '''
+  if np.allclose(y_hat, y): pass    # 评测代码特殊处理了一下除零异常
   return 1.0 * np.log10(np.sum(np.power(y, 2)) / np.sum(np.power(y - y_hat, 2)))
 
-def cross_correlation_coefficient(y_hat:ndarray, y:ndarray):
+def cross_correlation_coefficient(y_hat:ndarray, y:ndarray) -> float:
   ''' 互相关系数对数值缩放完全不敏感 '''
   y_shift = y - y.mean()
   y_hat_shift = y_hat - y_hat.mean()
   return np.sum(y_shift * y_hat_shift) / np.sqrt(np.sum(np.power(y_shift, 2)) * np.sum(np.power(y_hat_shift, 2)))
+
+def pearson_correlation(y_hat:ndarray, y:ndarray) -> float:
+  ''' 评测代码直接使用了scipy库的皮尔逊相关系数实现 '''
+  from scipy.stats import pearsonr
+  return pearsonr(y_hat, y).correlation
 
 
 if __name__ == '__main__':
@@ -136,4 +142,7 @@ if __name__ == '__main__':
     ''' [正常评估中] y_hat: 测振(CZ)预测值, y: 测振(CZ)真值 '''
     snr = signal_noise_ratio(x, y)
     ccc = cross_correlation_coefficient(x, y)
-    print(f'[{i}] snr: {snr:.3f}, ccc: {ccc:.3f}')
+    pc = pearson_correlation(x, y)
+    print(f'[{i}] snr: {snr:.7f}, ccc: {ccc:.7f}, pc: {pc:.7f}')
+    # 总分为两项指标的平均值
+    score = (snr + ccc) / 2
