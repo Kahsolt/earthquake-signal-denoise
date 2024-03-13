@@ -3,6 +3,7 @@
 # Create Time: 2024/02/01
 
 import os
+import sys
 import json
 from pathlib import Path
 from time import time
@@ -30,7 +31,10 @@ torch.set_float32_matmul_precision('medium')
 BASE_PATH = Path(__file__).parent.relative_to(Path.cwd())
 DATA_PATH = BASE_PATH / 'data'
 LOG_PATH = BASE_PATH / 'log' ; LOG_PATH.mkdir(exist_ok=True)
+REPO_PATH = BASE_PATH  / 'repo'
 SUBMIT_PATH = LOG_PATH / 'result.zip'
+MELGAN_PATH = REPO_PATH / 'melgan-neurips'
+sys.path.append(str(MELGAN_PATH))
 
 NLEN = 24000  # 4min (1min before + 3min after)
 SR   = 100    # 100Hz
@@ -107,7 +111,7 @@ def wav_log1p(x:ndarray) -> ndarray:
   neg_log1p = -np.log1p(-neg)
   return np.where(mask, pos_log1p, neg_log1p)
 
-def wav_norm(x:ndarray, C:float=5.0, remove_DC:bool=True) -> ndarray:
+def wav_norm(x:ndarray, C:float=1.0, remove_DC:bool=True) -> ndarray:
   X_min = x.min(axis=-1, keepdims=True)
   X_max = x.max(axis=-1, keepdims=True)
   x = (x - X_min) / (X_max - X_min)   # [0, 1]
@@ -118,7 +122,7 @@ def wav_norm(x:ndarray, C:float=5.0, remove_DC:bool=True) -> ndarray:
 
 def get_spec(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> ndarray:
   D = L.stft(y, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
-  M = np.clip(np.log(np.abs(D) + 1e-15), a_min=EPS, a_max=None)
+  M = np.clip(np.log10(np.abs(D) + 1e-15), a_min=EPS, a_max=None)
   return M
 
 def get_mag_phase(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> Tuple[ndarray, ndarray]:

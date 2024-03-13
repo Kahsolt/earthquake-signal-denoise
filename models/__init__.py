@@ -1,4 +1,5 @@
+from .utils import *
+
 from .denoiser import DenoiseModel
 from .envolope import EnvolopeModel, EnvolopeExtractor
-
-from .utils import *
+from .melgan import Audio2Spec, Generator, Discriminator

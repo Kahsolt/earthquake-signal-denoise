@@ -123,9 +123,9 @@ def train(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
-  parser.add_argument('-B', '--batch_size', type=int, default=64)
+  parser.add_argument('-B', '--batch_size', type=int, default=16)
   parser.add_argument('-E', '--epochs',     type=int, default=1000)
-  parser.add_argument('-lr', '--lr',        type=eval, default=2e-4)
+  parser.add_argument('-lr', '--lr',        type=eval, default=1e-4)
   parser.add_argument('--load', type=Path, help='ckpt to resume from')
   parser.add_argument('--seed', type=int, default=114514)
   args = parser.parse_args()
