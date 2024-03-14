@@ -9,7 +9,7 @@ from mel2wav.modules import WNConv1d, WNConvTranspose1d, ResnetBlock, Discrimina
 
 class Audio2Spec(nn.Module):
 
-  def __init__(self, n_fft=N_FFT, hop_length=HOP_LEN, win_length=WIN_LEN, sampling_rate=SR):
+  def __init__(self, n_fft=N_FFT, hop_length=HOP_LEN, win_length=WIN_LEN, sampling_rate=SR, device=device):
     super().__init__()
 
     self.n_fft = n_fft
