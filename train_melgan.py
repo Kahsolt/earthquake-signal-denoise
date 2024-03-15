@@ -18,6 +18,12 @@ from models import Audio2Spec, Generator, Discriminator
 torch.backends.cudnn.benchmark = True
 
 
+def phase_loss(y_hat:Tensor, y:Tensor) -> Tensor:
+  diff = F.l1_loss(y_hat, y, reduction='none')
+  diff_conj = 2 * np.pi - diff
+  return torch.where(diff < diff_conj, diff, diff_conj).mean()
+
+
 def train(args):
   seed_everything(args.seed)
   print('>> cmd:', ' '.join(sys.argv))
@@ -90,9 +96,9 @@ def train(args):
 
       ''' Discriminator '''
       with torch.no_grad():
-        s_t = fft(x_t).detach()
+        s_t = fft(x_t.detach())
         s_pred_t = fft(x_pred_t.detach())
-        s_error = F.l1_loss(s_pred_t, s_t)   # denoised spec <=> target clean spec
+        s_error = F.l1_loss(s_pred_t, s_t)    # denoised spec <=> target clean spec
 
       D_fake_det = netD(x_pred_t.detach())
       D_real = netD(x_t)
@@ -121,13 +127,17 @@ def train(args):
         for j in range(len(D_fake[i]) - 1):
           loss_feat += wt * F.l1_loss(D_fake[i][j], D_real[i][j].detach())
 
+      p_t = fft(x_t, ret_phase=True)
+      p_pred_t = fft(x_pred_t, ret_phase=True)
+      loss_phase = phase_loss(p_pred_t, p_t)   # may be right?
+
       netG.zero_grad()
-      loss_G_all = loss_G + args.lambda_feat * loss_feat
+      loss_G_all = loss_G + args.lambda_feat * loss_feat + loss_phase * 20
       loss_G_all.backward()
       optG.step()
 
       # bookkeep
-      costs.append([loss_D.item(), loss_G.item(), loss_feat.item(), s_error.item()])
+      costs.append([loss_D.item(), loss_G.item(), loss_feat.item(), s_error.item(), loss_phase.item()])
       writer.add_scalar("loss/disc", costs[-1][0], steps)
       writer.add_scalar("loss/gen",  costs[-1][1], steps)
       writer.add_scalar("loss/fmap", costs[-1][2], steps)

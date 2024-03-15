@@ -18,7 +18,7 @@ class Audio2Spec(nn.Module):
     self.sampling_rate = sampling_rate
     self.window = torch.hann_window(win_length).float().to(device)
 
-  def forward(self, audio:Tensor) -> Tensor:
+  def forward(self, audio:Tensor, ret_phase:bool=False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
     p = (self.n_fft - self.hop_length) // 2
     audio = F.pad(audio, (p, p), "reflect").squeeze(1)
     fft = torch.stft(
@@ -30,6 +30,7 @@ class Audio2Spec(nn.Module):
       center=False,
       return_complex=True,
     )
+    if ret_phase: return torch.angle(fft)
     return torch.log10(torch.clamp(torch.abs(fft), min=EPS))
 
 
