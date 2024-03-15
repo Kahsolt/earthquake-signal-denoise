@@ -75,8 +75,24 @@ class Generator(nn.Module):
     self.model = nn.Sequential(*model)
     self.apply(weights_init)
 
-  def forward(self, x):
+  def forward(self, x, ignored):
       return self.model(x)
+
+
+class GeneratorTE(Generator):
+
+  def __init__(self, input_size, ngf, n_residual_layers):
+    super().__init__(input_size + 32, ngf, n_residual_layers)
+
+    embed_dim = 32
+    self.posenc = nn.Embedding(NLEN//HOP_LEN, embed_dim)
+
+  def forward(self, x:Tensor, ids:Tensor) -> Tensor:
+    pe: Tensor = self.posenc(ids).swapaxes(1, 2)   # [B, D=32, L=128]
+    if DEBUG_SHAPE: print('pe:', pe.shape)
+    x = torch.cat([x, pe], dim=1)
+    if DEBUG_SHAPE: print('x_cat:', x.shape)
+    return self.model(x)
 
 
 if __name__ == '__main__':
@@ -93,7 +109,7 @@ if __name__ == '__main__':
 
   netG = Generator(args.n_mel_channels, args.ngf, args.n_residual_layers)
   netD = Discriminator(args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor)
-  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR)
+  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR, device='cpu')
 
   wav = torch.randn([4, 1, args.seq_len])
   print('wav.shape:', wav.shape)
@@ -103,3 +119,8 @@ if __name__ == '__main__':
   print('wav_hat.shape:', wav_hat.shape)
   scores = netD(wav_hat)
   print([[e.shape for e in d] for d in scores])
+
+  netG_te = GeneratorTE(args.n_mel_channels, args.ngf, args.n_residual_layers)
+  ids = torch.arange(N_FRAME).unsqueeze(dim=0).expand(mel.shape[0], -1)
+  wav_te_hat = netG_te(mel, ids)
+  print('wav_te_hat.shape:', wav_te_hat.shape)

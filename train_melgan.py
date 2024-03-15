@@ -13,7 +13,7 @@ from tensorboardX import SummaryWriter
 
 from utils import *
 from data import SignalDataset, DataLoader, make_split
-from models import Audio2Spec, Generator, Discriminator
+from models import Audio2Spec, Generator, Discriminator, GeneratorTE
 
 torch.backends.cudnn.benchmark = True
 
@@ -37,8 +37,12 @@ def train(args):
   writer = SummaryWriter(str(root))
 
   ''' Model '''
+  has_te = args.M == 'melgan-te'
   fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR).to(device)
-  netG = Generator(args.n_mel_channels, args.ngf, args.n_residual_layers).to(device)
+  if has_te:
+    netG = GeneratorTE(args.n_mel_channels, args.ngf, args.n_residual_layers).to(device)
+  else:
+    netG = Generator(args.n_mel_channels, args.ngf, args.n_residual_layers).to(device)
   netD = Discriminator(args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor).to(device)
   #print(netG)
   #print(netD)
@@ -69,13 +73,13 @@ def train(args):
   del X, Y, traindata, validdata, trainset, validset
 
   ''' Data (test) '''
-  mel_test_list: List[Tensor] = []
+  mel_test_list: List[Tuple[Tensor, Tensor]] = []
   with torch.inference_mode():
     for i, (x_n_t, x_t, ids) in enumerate(validloader):
       if i == args.n_test_samples: break
       s_t = fft(x_t.to(device)).detach()
       s_n_t = fft(x_n_t.to(device)).detach()
-      mel_test_list.append(s_n_t)
+      mel_test_list.append([s_n_t, ids.to(device)])
       fig = plt.figure()
       fig.gca().plot(x_t.squeeze().cpu().numpy())
       writer.add_figure("raw/wav_%d" % i, fig, 0)
@@ -91,8 +95,9 @@ def train(args):
   for epoch in range(1, args.epochs + 1):
     for batch_idx, (x_n_t, x_t, ids) in enumerate(trainloader):
       x_t = x_t.to(device)
+      ids = ids.to(device)
       s_n_t = fft(x_n_t.to(device)).detach()
-      x_pred_t = netG(s_n_t).to(device)   # noised spec => denoised wav
+      x_pred_t = netG(s_n_t, ids).to(device)   # noised spec => denoised wav
 
       ''' Discriminator '''
       with torch.no_grad():
@@ -127,7 +132,7 @@ def train(args):
         for j in range(len(D_fake[i]) - 1):
           loss_feat += wt * F.l1_loss(D_fake[i][j], D_real[i][j].detach())
 
-      if args.loss_phase:
+      if args.phase_loss:
         p_t = fft(x_t, ret_phase=True)
         p_pred_t = fft(x_pred_t, ret_phase=True)
         loss_phase = phase_loss(p_pred_t, p_t)   # may be right?
@@ -150,8 +155,8 @@ def train(args):
       if steps % args.save_interval == 0:
         st = time()
         with torch.inference_mode():
-          for i, s_n_t in enumerate(mel_test_list):
-            x_pred_t = netG(s_n_t)
+          for i, (s_n_t, ids) in enumerate(mel_test_list):
+            x_pred_t = netG(s_n_t, ids)
             s_pred_t = fft(x_pred_t)
             fig = plt.figure()
             fig.gca().plot(x_pred_t.squeeze().cpu().numpy())
@@ -189,6 +194,7 @@ def train(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
+  parser.add_argument('-M', default='melgan', choices=['melgan', 'melgan-te'])
   parser.add_argument("--phase_loss", action='store_true')
   parser.add_argument("--save_path", required=True)
   parser.add_argument("--load_path", default=None)
