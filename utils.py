@@ -149,6 +149,9 @@ def pearson_correlation(y_hat:ndarray, y:ndarray) -> float:
   from scipy.stats import pearsonr
   return pearsonr(y_hat, y).correlation
 
+def get_score(y_hat:ndarray, y:ndarray) -> float:
+  return (signal_noise_ratio(y_hat, y) + cross_correlation_coefficient(y_hat, y)) / 2
+
 
 if __name__ == '__main__':
   X, Y = get_data_train()
