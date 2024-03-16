@@ -128,9 +128,7 @@ def get_spec(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> 
 def get_mag_phase(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> Tuple[ndarray, ndarray]:
   D = L.stft(y, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
   mag, phase = L.spectrum.magphase(D)
-  M = mag
-  P = (np.log(phase) / 1j).real
-  return M, P
+  return mag, phase
 
 
 def signal_noise_ratio(y_hat:ndarray, y:ndarray) -> float:

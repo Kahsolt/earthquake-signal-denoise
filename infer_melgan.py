@@ -8,9 +8,10 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
 from utils import *
-from models import Generator, Audio2Spec
+from infer import griffinlim_hijack
+from models import Generator, Audio2Spec, GeneratorTE
 
-device = 'cpu'
+device = 'cuda'
 
 
 @torch.inference_mode()
@@ -20,7 +21,12 @@ def infer(args):
   logdir = Path(args.load_M)
   with open(logdir / 'args.yml', 'r', encoding='utf-8') as fh:
     hp = yaml.unsafe_load(fh)
-  modelM = Generator(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
+  if hp.M == 'melgan-te':
+    print('>> mode: GeneratorTE')
+    modelM = GeneratorTE(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
+  else:
+    print('>> mode: Generator')
+    modelM = Generator(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
   modelM.load_state_dict(torch.load(logdir / 'best_netG.pt'))
   fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR, device)
 
@@ -33,11 +39,18 @@ def infer(args):
     for name, x in tqdm(zip(namelist, x_test), total=len(namelist)):
       # norm domain: noisy signal -> noisy stft -> denoised signal
       x = wav_norm(x)
-      x_noisy = torch.from_numpy(x).unsqueeze(dim=0).unsqueeze(dim=0)
+      x_noisy = torch.from_numpy(x).unsqueeze(dim=0).unsqueeze(dim=0).to(device)
       logM_noisy = fft(x_noisy)
-      x_denoised = modelM(logM_noisy)
+      ids = torch.arange(0, len(x) // HOP_LEN).unsqueeze(dim=0).to(device)
+      x_denoised = modelM(logM_noisy, ids)
       logM_denoised = fft(x_denoised)
       x_norm_denoised = x_denoised.squeeze().cpu().numpy()
+
+      if 'try keep phase':
+        _, P = get_mag_phase(x[:-1], **FFT_PARAMS)
+        S, _ = get_mag_phase(x_norm_denoised[:-1], **FFT_PARAMS)
+        breakpoint()
+        x_norm_denoised = griffinlim_hijack(S, P, n_iter=32, **FFT_PARAMS, length=len(x))
 
       if args.debug and 'cmp spec denoise':
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
@@ -50,7 +63,7 @@ def infer(args):
         plt.show()
 
       # shift envolope
-      x_denoised_shifted = x_norm_denoised
+      x_denoised_shifted = x_norm_denoised * 5
 
       # truncate length
       if name in lendict:
