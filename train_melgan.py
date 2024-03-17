@@ -18,12 +18,6 @@ from models import Audio2Spec, Generator, Discriminator, GeneratorTE
 torch.backends.cudnn.benchmark = True
 
 
-def phase_loss(y_hat:Tensor, y:Tensor) -> Tensor:
-  diff = F.l1_loss(y_hat, y, reduction='none')
-  diff_conj = 2 * np.pi - diff
-  return torch.where(diff < diff_conj, diff, diff_conj).mean()
-
-
 def train(args):
   seed_everything(args.seed)
   print('>> cmd:', ' '.join(sys.argv))
