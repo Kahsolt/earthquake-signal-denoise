@@ -6,7 +6,7 @@ import sys
 from argparse import ArgumentParser
 
 import torch.nn.functional as F
-from torch.optim import Optimizer, SGD, Adam
+from torch.optim import Optimizer, Adam
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
@@ -37,17 +37,7 @@ class LitModel(LightningModule):
     self.valid_mae = MeanAbsoluteError()
 
   def configure_optimizers(self) -> Optimizer:
-    sel = 0
-    if sel == 0:
-      optim = Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-    else:
-      optim = SGD(self.model.parameters(), lr=self.lr, weight_decay=1e-5, momentum=0.9)
-    return optim
-
-  def optimizer_step(self, epoch:int, batch_idx:int, optim:Optimizer, optim_closure:Callable):
-    super().optimizer_step(epoch, batch_idx, optim, optim_closure)
-    if batch_idx % 10 == 0:
-      self.log_dict({f'lr/{i}': group['lr'] for i, group in enumerate(optim.param_groups)})
+    return Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
 
   def on_after_backward(self):
     found_nan_or_inf = False
@@ -100,9 +90,9 @@ def train(args):
     'pin_memory': True,
   }
   X, Y = get_data_train()
-  trainset, validset = make_split(X, Y, ratio=0.1)
-  trainloader = DataLoader(SpecDataset(trainset, transform=wav_norm), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SpecDataset(validset, transform=wav_norm), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  trainset, validset = make_split(X, Y, ratio=0.01)
+  trainloader = DataLoader(SpecDataset(trainset), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SpecDataset(validset), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = DenoiseModel()
@@ -117,6 +107,7 @@ def train(args):
     precision='32',
     benchmark=True,
     enable_checkpointing=True,
+    log_every_n_steps=5,
   )
   trainer.fit(lit, trainloader, validloader)
 
@@ -124,7 +115,7 @@ def train(args):
 if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('-B', '--batch_size', type=int, default=16)
-  parser.add_argument('-E', '--epochs',     type=int, default=1000)
+  parser.add_argument('-E', '--epochs',     type=int, default=10000)
   parser.add_argument('-lr', '--lr',        type=eval, default=1e-4)
   parser.add_argument('--load', type=Path, help='ckpt to resume from')
   parser.add_argument('--seed', type=int, default=114514)

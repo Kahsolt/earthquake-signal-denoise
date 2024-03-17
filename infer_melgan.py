@@ -8,26 +8,24 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
 from utils import *
-from infer import griffinlim_hijack
-from models import Generator, Audio2Spec, GeneratorTE
-
-device = 'cuda'
+from infer_denoiser import griffinlim_hijack
+from models import Generator, GeneratorTE, Audio2Spec
 
 
-@torch.inference_mode()
+@torch.inference_mode
 @timer
 def infer(args):
   ''' Model & Ckpt '''
-  logdir = Path(args.load_M)
+  logdir = Path(args.load)
   with open(logdir / 'args.yml', 'r', encoding='utf-8') as fh:
     hp = yaml.unsafe_load(fh)
   if hp.M == 'melgan-te':
     print('>> mode: GeneratorTE')
-    modelM = GeneratorTE(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
+    model = GeneratorTE(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
   else:
     print('>> mode: Generator')
-    modelM = Generator(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
-  modelM.load_state_dict(torch.load(logdir / 'best_netG.pt'))
+    model = Generator(hp.n_mel_channels, hp.ngf, hp.n_residual_layers).to(device)
+  model.load_state_dict(torch.load(logdir / 'best_netG.pt'))
   fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR, device)
 
   ''' Data & Infer '''
@@ -42,7 +40,7 @@ def infer(args):
       x_noisy = torch.from_numpy(x).unsqueeze(dim=0).unsqueeze(dim=0).to(device)
       logM_noisy = fft(x_noisy)
       ids = torch.arange(0, len(x) // HOP_LEN).unsqueeze(dim=0).to(device)
-      x_denoised = modelM(logM_noisy, ids)
+      x_denoised = model(logM_noisy, ids)
       logM_denoised = fft(x_denoised)
       x_norm_denoised = x_denoised.squeeze().cpu().numpy()
 
@@ -78,7 +76,7 @@ def infer(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
-  parser.add_argument('--load_M', default='lightning_logs/melgan', type=Path, help='pretrained melgan ckpt')
+  parser.add_argument('--load', default='lightning_logs/melgan', type=Path, help='pretrained melgan ckpt')
   parser.add_argument('--debug', action='store_true', help='plot debug results')
   args = parser.parse_args()
 

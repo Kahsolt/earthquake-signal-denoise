@@ -132,20 +132,13 @@ def train(args):
         for j in range(len(D_fake[i]) - 1):
           loss_feat += wt * F.l1_loss(D_fake[i][j], D_real[i][j].detach())
 
-      if args.phase_loss:
-        p_t = fft(x_t, ret_phase=True)
-        p_pred_t = fft(x_pred_t, ret_phase=True)
-        loss_phase = phase_loss(p_pred_t, p_t)   # may be right?
-      else:
-        loss_phase = torch.zeros([], device=loss_G.device)
-
       netG.zero_grad()
-      loss_G_all = loss_G + args.lambda_feat * loss_feat + loss_phase * 20
+      loss_G_all = loss_G + args.lambda_feat * loss_feat
       loss_G_all.backward()
       optG.step()
 
       # bookkeep
-      costs.append([loss_D.item(), loss_G.item(), loss_feat.item(), s_error.item(), loss_phase.item()])
+      costs.append([loss_D.item(), loss_G.item(), loss_feat.item(), s_error.item()])
       writer.add_scalar("loss/disc", costs[-1][0], steps)
       writer.add_scalar("loss/gen",  costs[-1][1], steps)
       writer.add_scalar("loss/fmap", costs[-1][2], steps)
@@ -195,7 +188,6 @@ def train(args):
 if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('-M', default='melgan', choices=['melgan', 'melgan-te'])
-  parser.add_argument("--phase_loss", action='store_true')
   parser.add_argument("--save_path", required=True)
   parser.add_argument("--load_path", default=None)
   parser.add_argument("--n_mel_channels", type=int, default=N_SPEC)

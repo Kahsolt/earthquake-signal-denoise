@@ -8,7 +8,6 @@ python train_envolope.py -E 500
 python train_denoiser.py -E 3000
 
 python train_melgan.py -M melgan --save_path lightning_logs\melgan
-python train_melgan.py -M melgan --load_path lightning_logs\melgan --save_path lightning_logs\melgan.phase_loss --phase_loss
 python train_melgan.py -M melgan-te --save_path lightning_logs\melgan-te
 
 :infer

@@ -26,7 +26,7 @@ DEBUG_SHAPE = os.getenv('DEBUG_SHAPE', False)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision('highest')
 
 BASE_PATH = Path(__file__).parent.relative_to(Path.cwd())
 DATA_PATH = BASE_PATH / 'data'
