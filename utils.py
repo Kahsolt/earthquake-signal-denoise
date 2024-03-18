@@ -126,7 +126,7 @@ def wav_norm(x:ndarray, C:float=1.0, remove_DC:bool=True) -> ndarray:
 
 def griffinlim_hijack(
   specgram: Tensor,
-  init_phase: Tensor,
+  init_phase: Tensor = None,
   n_iter: int = 32,
   n_fft: int = N_FFT,
   hop_length: int = HOP_LEN,
@@ -134,8 +134,10 @@ def griffinlim_hijack(
   momentum: float = 0.99,
   length: Optional[int] = None,
 ) -> Tensor:
-  from torchaudio.functional import griffinlim
-  from torchaudio.transforms import GriffinLim
+  try:
+    from torchaudio.functional import griffinlim
+    from torchaudio.transforms import GriffinLim
+  except: pass
 
   window = torch.hann_window(win_length).float().to(specgram.device)
   momentum = momentum / (1 + momentum)
@@ -143,7 +145,10 @@ def griffinlim_hijack(
   shape = specgram.size()
   specgram = specgram.reshape([-1] + list(shape[-2:]))
   # initialize the phase
-  angles = init_phase
+  if init_phase is not None:
+    angles = init_phase
+  else:
+    angles = torch.rand(specgram.size(), dtype=torch.complex64, device=specgram.device)
   # And initialize the previous iterate to 0
   tprev = torch.tensor(0.0, dtype=specgram.dtype, device=specgram.device)
   for _ in range(n_iter):

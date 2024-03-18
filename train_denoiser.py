@@ -23,7 +23,7 @@ class LitModel(LightningModule):
     super().__init__()
 
     self.model = model
-    self.fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR)
+    self.fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device)
 
     # ↓↓ training specified ↓↓
     self.args = None
@@ -55,8 +55,8 @@ class LitModel(LightningModule):
 
   def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tensor:
     x_wav, y_wav, ids = batch
-    x_spec = self.fft(x_wav)
-    y_spec = self.fft(y_wav)
+    x_spec = self.fft(x_wav)[:, :-1, :]
+    y_spec = self.fft(y_wav)[:, :-1, :]
 
     if 'debug gradient NaN':
       self.x_wav, self.y_wav, self.ids = x_wav, y_wav, ids
@@ -105,7 +105,7 @@ def train(args):
   X, Y = get_data_train()
   trainset, validset = make_split(X, Y, ratio=0.01)
   trainloader = DataLoader(SignalDataset(trainset, n_seg=N_SEG, aug=True),  args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SignalDataset(validset,              aug=False), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  validloader = DataLoader(SignalDataset(validset, n_seg=N_SEG, aug=False), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = DenoiseModel()

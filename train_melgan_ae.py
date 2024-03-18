@@ -33,7 +33,7 @@ def train(args):
   writer = SummaryWriter(str(root))
 
   ''' Model '''
-  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR).to(device)
+  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device)
   netG = GeneratorAE(args.n_mel_channels, args.ngf, args.n_residual_layers).to(device)
   netD = DiscriminatorAE(args.n_mel_channels, args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor).to(device)
   #print(netG)

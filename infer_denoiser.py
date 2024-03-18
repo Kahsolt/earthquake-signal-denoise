@@ -6,7 +6,6 @@ import os
 from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
-import torchaudio.functional as TAF
 from train_denoiser import LitModel as DenoiserLitModel
 from models import DenoiseModel, Audio2Spec
 from utils import *
@@ -27,7 +26,7 @@ def infer(args):
   ''' Model & Ckpt '''
   model: DenoiseModel = DenoiserLitModel.load_from_checkpoint(args.load, model=DenoiseModel()).model.eval().to(device)
   model.remove_weight_norm()
-  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR).to(device)
+  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device)
 
   def denoise(M:Tensor) -> Tensor:
     ''' sliced inference to match model I/O size '''
@@ -64,8 +63,8 @@ def infer(args):
   with ZipFile(fp_submit, 'w', compression=ZIP_DEFLATED, compresslevel=9) as zf:
     for name, x in tqdm(zip(namelist, X), total=len(namelist)):
       # noisy signal -> (stft) -> sliced denoise -> (istft) -> denoised signal
-      x = torch.from_numpy(x).unsqueeze_(0).unsqueeze_(0).to(device)
-      logS, P = fft(x, ret_mag=True, ret_phase=True)  # [F=65, L=750]
+      x_noisy = torch.from_numpy(x).unsqueeze_(0).unsqueeze_(0).to(device)
+      logS, P = fft(x_noisy, ret_mag=True, ret_phase=True)  # [F=65, L=750]
 
       # denoise
       logS_low, logS_high = logS[:-1], np.ones_like(logS[-1:]) * EPS    # suppress hifreq
@@ -76,19 +75,20 @@ def infer(args):
       # inv_wav
       sel = 1
       if sel == 0:
-        x_denoised: Tensor = TAF.griffinlim(S_denoised, fft.window, **FFT_PARAMS, length=len(x))
+        x_denoised: Tensor = griffinlim_hijack(S_denoised, **FFT_PARAMS, length=len(x))
       elif sel == 1:
         x_denoised: Tensor = griffinlim_hijack(S_denoised, P, **FFT_PARAMS, length=len(x))
       elif sel == 2:
         x_denoised: Tensor = torch.istft(S_denoised * P, **FFT_PARAMS, window=fft.window, length=len(x))
 
       if args.debug and 'cmp denoise':
+        import librosa.display as LD
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
         plt.clf()
-        plt.subplot(221) ; plt.title('1. x')               ; plt.plot(x.cpu().numpy())
+        plt.subplot(221) ; plt.title('1. x')               ; plt.plot(x)
         plt.subplot(222) ; plt.title('4. denoised x')      ; plt.plot(x_denoised.cpu().numpy())
-        plt.subplot(223) ; plt.title('2. x_logM')          ; LD.specshow(logS.cpu().numpy(),          sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
-        plt.subplot(224) ; plt.title('3. denoised x_logM') ; LD.specshow(logS_denoised.cpu().numpy(), sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
+        plt.subplot(223) ; plt.title('2. x_logS')          ; LD.specshow(logS.cpu().numpy(),          sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
+        plt.subplot(224) ; plt.title('3. denoised x_logS') ; LD.specshow(logS_denoised.cpu().numpy(), sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
         plt.suptitle('infer denoise model')
         plt.show()
 

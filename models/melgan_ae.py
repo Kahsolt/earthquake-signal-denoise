@@ -2,6 +2,10 @@
 # Author: Armit
 # Create Time: 2024/03/17  
 
+'''
+modeling: log10(stft(QZ)) -> log10(stft(CZ))
+'''
+
 from models.utils import *
 
 from mel2wav.modules import WNConv1d, WNConvTranspose1d, ResnetBlock, weights_init

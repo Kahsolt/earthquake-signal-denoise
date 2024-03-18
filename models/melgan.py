@@ -2,6 +2,12 @@
 # Author: Armit
 # Create Time: 2024/02/20  
 
+'''
+modeling: log10(stft(QZ)) -> wav_norm(CZ)
+  - 优点: 直出波形，谱看似合理
+  - 缺点: 相位差异大、也不知道振幅该如何反归一化
+'''
+
 from mel2wav.modules import WNConv1d, WNConvTranspose1d, ResnetBlock, Discriminator, weights_init
 
 from models.fft import Audio2Spec
@@ -49,7 +55,7 @@ class Generator(nn.Module):
     self.model = nn.Sequential(*model)
     self.apply(weights_init)
 
-  def forward(self, x, ignored):
+  def forward(self, x):
       return self.model(x)
 
 
