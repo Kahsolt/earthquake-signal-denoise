@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 import torch.nn.functional as F
 from torch.optim import Optimizer, Adam
 from lightning import LightningModule, Trainer, seed_everything
-from torchmetrics.regression import MeanAbsoluteError
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from data import SignalDataset, DataLoader, make_split
 from models import DenoiseModel, Audio2Spec
@@ -29,20 +29,16 @@ class LitModel(LightningModule):
     self.args = None
     self.epochs = -1
     self.lr = 2e-4
-    self.train_mae = None
-    self.valid_mae = None
 
   def setup_train_args(self, args):
     self.args = args
     self.epochs = args.epochs
     self.lr = args.lr
-    self.train_mae = MeanAbsoluteError()
-    self.valid_mae = MeanAbsoluteError()
 
   def configure_optimizers(self) -> Optimizer:
     return Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
 
-  def on_after_backward(self):
+  def not_on_after_backward(self):
     found_nan_or_inf = False
     for param in self.parameters():
       if not found_nan_or_inf: break
@@ -58,7 +54,7 @@ class LitModel(LightningModule):
     x_spec = self.fft(x_wav)[:, :-1, :]
     y_spec = self.fft(y_wav)[:, :-1, :]
 
-    if 'debug gradient NaN':
+    if not 'debug gradient NaN':
       self.x_wav, self.y_wav, self.ids = x_wav, y_wav, ids
       self.x_spec, self.y_spec = x_spec, y_spec
       if any([
@@ -74,12 +70,8 @@ class LitModel(LightningModule):
     loss = F.l1_loss(output, y_spec)
 
     if prefix == 'train':
-      self.train_mae(output, y_spec)
-      self.log('train/mae', self.train_mae, on_step=True, on_epoch=True)
       self.log('train/loss', loss.item(), on_step=True, on_epoch=True)
     else:
-      self.valid_mae(output, y_spec)
-      self.log('valid/mae', self.valid_mae, on_step=False, on_epoch=True)
       self.log('valid/loss', loss.item(), on_step=False, on_epoch=True)
 
     return loss
@@ -115,12 +107,14 @@ def train(args):
   lit.setup_train_args(args)
 
   ''' Train '''
+  model_ckpt_callback = ModelCheckpoint(monitor='valid/loss', mode='min')
   trainer = Trainer(
     max_epochs=args.epochs,
     precision='32',
     benchmark=True,
     enable_checkpointing=True,
     log_every_n_steps=5,
+    callbacks=[model_ckpt_callback],
   )
   trainer.fit(lit, trainloader, validloader)
 

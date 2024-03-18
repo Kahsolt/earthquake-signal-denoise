@@ -28,10 +28,10 @@ def infer(args):
   model.remove_weight_norm()
   fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device)
 
-  def denoise(M:Tensor) -> Tensor:
+  def denoise(X:Tensor) -> Tensor:
     ''' sliced inference to match model I/O size '''
-    X = M                                      # [F, L]
-    E = torch.arange(M.shape[-1]).to(device)   # [L]
+    X   # [F, L]
+    E = torch.arange(X.shape[-1]).to(device)   # [L]
 
     # slice & pack
     slicers = []
@@ -64,12 +64,12 @@ def infer(args):
     for name, x in tqdm(zip(namelist, X), total=len(namelist)):
       # noisy signal -> (stft) -> sliced denoise -> (istft) -> denoised signal
       x_noisy = torch.from_numpy(x).unsqueeze_(0).unsqueeze_(0).to(device)
-      logS, P = fft(x_noisy, ret_mag=True, ret_phase=True)  # [F=65, L=750]
+      logS, P = fft(x_noisy, ret_mag=True, ret_phase=True)  # [B=1, F=65, L=750]
 
       # denoise
-      logS_low, logS_high = logS[:-1], np.ones_like(logS[-1:]) * EPS    # suppress hifreq
-      logS_low_denoised = denoise(logS_low)   # [F=64, L=750]
-      logS_denoised = torch.cat([logS_low_denoised, logS_high], dim=0)  # [F=65, L=750]
+      logS_low, logS_high = logS[:, :-1, :], torch.ones_like(logS[:, -1:, :]) * EPS    # suppress hifreq
+      logS_low_denoised = denoise(logS_low.squeeze(0)).unsqueeze(0)   # [F=64, L=750]
+      logS_denoised = torch.cat([logS_low_denoised, logS_high], dim=1)  # [B=1, F=65, L=750]
       S_denoised = 10 ** logS_denoised
 
       # inv_wav
@@ -80,20 +80,20 @@ def infer(args):
         x_denoised: Tensor = griffinlim_hijack(S_denoised, P, fft, length=len(x))
       elif sel == 2:
         x_denoised: Tensor = torch.istft(S_denoised * P, **FFT_PARAMS, window=fft.window, length=len(x))
+      x_denoised: ndarray = x_denoised.squeeze().cpu().numpy()
 
       if args.debug and 'cmp denoise':
         import librosa.display as LD
         # https://matplotlib.org/2.0.2/examples/color/colormaps_reference.html
         plt.clf()
         plt.subplot(221) ; plt.title('1. x')               ; plt.plot(x)
-        plt.subplot(222) ; plt.title('4. denoised x')      ; plt.plot(x_denoised.cpu().numpy())
-        plt.subplot(223) ; plt.title('2. x_logS')          ; LD.specshow(logS.cpu().numpy(),          sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
-        plt.subplot(224) ; plt.title('3. denoised x_logS') ; LD.specshow(logS_denoised.cpu().numpy(), sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
+        plt.subplot(222) ; plt.title('4. denoised x')      ; plt.plot(x_denoised)
+        plt.subplot(223) ; plt.title('2. x_logS')          ; LD.specshow(logS.squeeze().cpu().numpy(),          sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
+        plt.subplot(224) ; plt.title('3. denoised x_logS') ; LD.specshow(logS_denoised.squeeze().cpu().numpy(), sr=SR, hop_length=HOP_LEN, win_length=WIN_LEN, cmap='plasma')
         plt.suptitle('infer denoise model')
         plt.show()
 
       # truncate length
-      x_denoised = x_denoised.cpu().numpy()
       if name in lendict:
         x_denoised = x_denoised[:lendict[name]]
 
