@@ -127,10 +127,8 @@ def wav_norm(x:ndarray, C:float=1.0, remove_DC:bool=True) -> ndarray:
 def griffinlim_hijack(
   specgram: Tensor,
   init_phase: Tensor = None,
+  fft: 'Audio2Spec' = None,
   n_iter: int = 32,
-  n_fft: int = N_FFT,
-  hop_length: int = HOP_LEN,
-  win_length: int = WIN_LEN,
   momentum: float = 0.99,
   length: Optional[int] = None,
 ) -> Tensor:
@@ -139,7 +137,13 @@ def griffinlim_hijack(
     from torchaudio.transforms import GriffinLim
   except: pass
 
-  window = torch.hann_window(win_length).float().to(specgram.device)
+  from models import Audio2Spec
+  fft: Audio2Spec = fft or Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, specgram.device)
+  window = fft.window
+  n_fft = fft.n_fft
+  hop_length = fft.hop_length
+  win_length = fft.win_length
+
   momentum = momentum / (1 + momentum)
   # pack batch
   shape = specgram.size()
@@ -155,18 +159,7 @@ def griffinlim_hijack(
     # Invert with our current estimate of the phases
     inverse = torch.istft(specgram * angles, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, length=length)
     # Rebuild the spectrogram
-    rebuilt = torch.stft(
-      input=inverse,
-      n_fft=n_fft,
-      hop_length=hop_length,
-      win_length=win_length,
-      window=window,
-      center=True,
-      pad_mode="reflect",
-      normalized=False,
-      onesided=True,
-      return_complex=True,
-    )
+    rebuilt = fft(inverse, ret_D=True)
     # Update our phase estimates
     angles = rebuilt
     if momentum:
@@ -174,7 +167,6 @@ def griffinlim_hijack(
     angles = angles.div(angles.abs().add(1e-16))
     # Store the previous iterate
     tprev = rebuilt
-
   # Return the final phase estimates
   waveform = torch.istft(specgram * angles, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, length=length)
   # unpack batch

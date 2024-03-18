@@ -34,7 +34,7 @@ def infer(args):
       logS_noisy, P_noisy = fft(x_noisy, ret_mag=True, ret_phase=True)
       logS_denoised = model(logS_noisy)
       S_denoised = 10 ** logS_denoised
-      x_denoised = griffinlim_hijack(S_denoised, P_noisy, n_iter=32, **FFT_PARAMS, length=len(x)).squeeze_().cpu().numpy()
+      x_denoised = griffinlim_hijack(S_denoised, P_noisy, fft, n_iter=32, length=len(x)).squeeze_().cpu().numpy()
 
       if args.debug and 'cmp spec denoise':
         import librosa.display as LD

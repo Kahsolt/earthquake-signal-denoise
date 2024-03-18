@@ -75,9 +75,9 @@ def infer(args):
       # inv_wav
       sel = 1
       if sel == 0:
-        x_denoised: Tensor = griffinlim_hijack(S_denoised, **FFT_PARAMS, length=len(x))
+        x_denoised: Tensor = griffinlim_hijack(S_denoised, fft, length=len(x))
       elif sel == 1:
-        x_denoised: Tensor = griffinlim_hijack(S_denoised, P, **FFT_PARAMS, length=len(x))
+        x_denoised: Tensor = griffinlim_hijack(S_denoised, P, fft, length=len(x))
       elif sel == 2:
         x_denoised: Tensor = torch.istft(S_denoised * P, **FFT_PARAMS, window=fft.window, length=len(x))
 
