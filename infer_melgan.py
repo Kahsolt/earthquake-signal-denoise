@@ -8,7 +8,6 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
 from utils import *
-from infer_denoiser import griffinlim_hijack
 from models import Generator, GeneratorTE, Audio2Spec
 
 
@@ -45,9 +44,8 @@ def infer(args):
       x_norm_denoised = x_denoised.squeeze().cpu().numpy()
 
       if 'try keep phase':
-        _, P = get_mag_phase(x[:-1], **FFT_PARAMS)
-        S, _ = get_mag_phase(x_norm_denoised[:-1], **FFT_PARAMS)
-        breakpoint()
+        _, P = fft(x, ret_mag=False, ret_phase=True).cpu().numpy()
+        S, _ = fft(x_norm_denoised, ret_mag=True, ret_phase=False).cpu().numpy()
         x_norm_denoised = griffinlim_hijack(S, P, n_iter=32, **FFT_PARAMS, length=len(x))
 
       if args.debug and 'cmp spec denoise':

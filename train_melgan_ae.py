@@ -2,6 +2,8 @@
 # Author: Armit
 # Create Time: 2024/03/13
 
+# log10(stft(QZ)) -> log10(stft(CZ))
+
 import sys
 from argparse import ArgumentParser
 
@@ -56,26 +58,23 @@ def train(args):
     'persistent_workers': False,
     'pin_memory': True,
   }
-  trainset = SignalDataset(traindata, transform=wav_norm, n_seg=N_SEG, aug=True)
-  validset = SignalDataset(validdata, transform=wav_norm,              aug=False)
+  trainset = SignalDataset(traindata, n_seg=N_SEG, aug=True)
+  validset = SignalDataset(validdata,              aug=False)
   trainloader = DataLoader(trainset, args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
   validloader = DataLoader(validset, 1, shuffle=False, drop_last=False, **dataloader_kwargs)
   del X, Y, traindata, validdata, trainset, validset
 
   ''' Data (test) '''
-  mel_test_list: List[Tuple[Tensor, Tensor]] = []
+  spec_test_list: List[Tensor] = []
   with torch.inference_mode():
     for i, (x_n_t, x_t, _) in enumerate(validloader):
       if i == args.n_test_samples: break
       s_t = fft(x_t.to(device)).detach()
       s_n_t = fft(x_n_t.to(device)).detach()
-      mel_test_list.append(s_n_t)
+      spec_test_list.append(s_n_t)
       fig = plt.figure()
-      fig.gca().plot(x_t.squeeze().cpu().numpy())
-      writer.add_figure("raw/wav_%d" % i, fig, 0)
-      #fig = plt.figure()
-      #fig.gca().imshow(s_t.squeeze().cpu().numpy(), interpolation='none')
-      #writer.add_figure("raw/spec_%d" % i, fig, 0)
+      fig.gca().imshow(s_t.squeeze().cpu().numpy(), interpolation='none')
+      writer.add_figure("raw/spec_%d" % i, fig, 0)
 
   ''' Train '''
   costs: List[List[float]] = []
@@ -84,18 +83,17 @@ def train(args):
   steps = 0
   for epoch in range(1, args.epochs + 1):
     for batch_idx, (x_n_t, x_t, _) in enumerate(trainloader):
-      x_t = x_t.to(device)
-      s_n_t = fft(x_n_t.to(device)).detach()
-      x_pred_t = netG(s_n_t).to(device)   # noised spec => denoised wav
+      s_n_t = fft(x_n_t.to(device))  # noised spec
+      s_t = fft(x_t.to(device))      # target clean spec
+
+      s_pred_t = netG(s_n_t).to(device)   # noised spec => denoised spec
 
       ''' Discriminator '''
       with torch.no_grad():
-        s_t = fft(x_t.detach())
-        s_pred_t = fft(x_pred_t.detach())
-        s_error = F.l1_loss(s_pred_t, s_t)    # denoised spec <=> target clean spec
+        s_error = F.l1_loss(s_pred_t.detach(), s_t)    # denoised spec <=> target clean spec
 
-      D_fake_det = netD(x_pred_t.detach())
-      D_real = netD(x_t)
+      D_fake_det = netD(s_pred_t.detach())
+      D_real = netD(s_t)
 
       loss_D = 0
       for scale in D_fake_det:
@@ -108,7 +106,7 @@ def train(args):
       optD.step()
 
       ''' Generator '''
-      D_fake = netD(x_pred_t)
+      D_fake = netD(s_pred_t)
       loss_G = 0
       for scale in D_fake:
         loss_G += -scale[-1].mean()
@@ -137,15 +135,11 @@ def train(args):
       if steps % args.save_interval == 0:
         st = time()
         with torch.inference_mode():
-          for i, (s_n_t, _) in enumerate(mel_test_list):
-            x_pred_t = netG(s_n_t)
-            s_pred_t = fft(x_pred_t)
+          for i, s_n_t in enumerate(spec_test_list):
+            s_pred_t = netG(s_n_t)
             fig = plt.figure()
-            fig.gca().plot(x_pred_t.squeeze().cpu().numpy())
-            writer.add_figure("gen/wav_%d" % i, fig, epoch)
-            #fig = plt.figure()
-            #fig.gca().imshow(s_pred_t.squeeze().cpu().numpy(), interpolation='none')
-            #writer.add_figure("gen/spec_%d" % i, fig, epoch)
+            fig.gca().imshow(s_pred_t.squeeze().cpu().numpy(), interpolation='none')
+            writer.add_figure("gen/spec_%d" % i, fig, epoch)
 
         torch.save(netG.state_dict(), root / "netG.pt")
         torch.save(optG.state_dict(), root / "optG.pt")

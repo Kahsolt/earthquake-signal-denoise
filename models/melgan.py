@@ -2,36 +2,10 @@
 # Author: Armit
 # Create Time: 2024/02/20  
 
-from models.utils import *
-
 from mel2wav.modules import WNConv1d, WNConvTranspose1d, ResnetBlock, Discriminator, weights_init
 
-
-class Audio2Spec(nn.Module):
-
-  def __init__(self, n_fft=N_FFT, hop_length=HOP_LEN, win_length=WIN_LEN, sampling_rate=SR, device=device):
-    super().__init__()
-
-    self.n_fft = n_fft
-    self.hop_length = hop_length
-    self.win_length = win_length
-    self.sampling_rate = sampling_rate
-    self.window = torch.hann_window(win_length).float().to(device)
-
-  def forward(self, audio:Tensor, ret_phase:bool=False) -> Union[Tensor, Tuple[Tensor, Tensor]]:
-    p = (self.n_fft - self.hop_length) // 2
-    audio = F.pad(audio, (p, p), "reflect").squeeze(1)
-    fft = torch.stft(
-      audio,
-      n_fft=self.n_fft,
-      hop_length=self.hop_length,
-      win_length=self.win_length,
-      window=self.window,
-      center=False,
-      return_complex=True,
-    )
-    if ret_phase: return torch.angle(fft)
-    return torch.log10(torch.clamp(torch.abs(fft), min=EPS))
+from models.fft import Audio2Spec
+from models.utils import *
 
 
 class Generator(nn.Module):
@@ -109,7 +83,7 @@ if __name__ == '__main__':
 
   netG = Generator(args.n_mel_channels, args.ngf, args.n_residual_layers)
   netD = Discriminator(args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor)
-  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR, device='cpu')
+  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device='cpu')
 
   wav = torch.randn([4, 1, args.seq_len])
   print('wav.shape:', wav.shape)

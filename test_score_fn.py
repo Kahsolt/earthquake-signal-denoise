@@ -2,9 +2,13 @@
 # Author: Armit
 # Create Time: 2024/03/15
 
-from infer import *
+import librosa as L
+import librosa.display as LD
+
+from utils import *
 
 # 测试评分函数的性质
+# WARNING: this script is broken, we just keep the recorded results here :(
 
 
 @timer

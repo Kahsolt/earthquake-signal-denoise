@@ -2,6 +2,8 @@
 # Author: Armit
 # Create Time: 2024/03/05
 
+# log10(stft(QZ)) -> log10(stft(CZ))
+
 import sys
 from argparse import ArgumentParser
 
@@ -10,8 +12,8 @@ from torch.optim import Optimizer, Adam
 from lightning import LightningModule, Trainer, seed_everything
 from torchmetrics.regression import MeanAbsoluteError
 
-from data import SpecDataset, DataLoader, make_split
-from models import DenoiseModel
+from data import SignalDataset, DataLoader, make_split
+from models import DenoiseModel, Audio2Spec
 from utils import *
 
 
@@ -21,6 +23,7 @@ class LitModel(LightningModule):
     super().__init__()
 
     self.model = model
+    self.fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR)
 
     # ↓↓ training specified ↓↓
     self.args = None
@@ -51,21 +54,31 @@ class LitModel(LightningModule):
       breakpoint()
 
   def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tensor:
-    x, y, ids = batch
-    self.x, self.y, self.ids = x, y, ids    # debug gradient NaN
-    if torch.isnan(x).any() or torch.isinf(x).any() or torch.isnan(y).any() or torch.isinf(y).any():
-      print(f'>> detected inf or nan values in inputs')
-      breakpoint()
+    x_wav, y_wav, ids = batch
+    x_spec = self.fft(x_wav)
+    y_spec = self.fft(y_wav)
 
-    output = self.model(x, ids)
-    loss = F.l1_loss(output, y)
+    if 'debug gradient NaN':
+      self.x_wav, self.y_wav, self.ids = x_wav, y_wav, ids
+      self.x_spec, self.y_spec = x_spec, y_spec
+      if any([
+        torch.isnan(x_wav).any(),  torch.isinf(x_wav).any(),
+        torch.isnan(y_wav).any(),  torch.isinf(y_wav).any(),
+        torch.isnan(x_spec).any(), torch.isinf(x_spec).any(),
+        torch.isnan(y_spec).any(), torch.isinf(y_spec).any(),
+      ]):
+        print(f'>> detected inf or nan values in inputs')
+        breakpoint()
+
+    output = self.model(x_spec, ids)
+    loss = F.l1_loss(output, y_spec)
 
     if prefix == 'train':
-      self.train_mae(output, y)
+      self.train_mae(output, y_spec)
       self.log('train/mae', self.train_mae, on_step=True, on_epoch=True)
       self.log('train/loss', loss.item(), on_step=True, on_epoch=True)
     else:
-      self.valid_mae(output, y)
+      self.valid_mae(output, y_spec)
       self.log('valid/mae', self.valid_mae, on_step=False, on_epoch=True)
       self.log('valid/loss', loss.item(), on_step=False, on_epoch=True)
 
@@ -91,8 +104,8 @@ def train(args):
   }
   X, Y = get_data_train()
   trainset, validset = make_split(X, Y, ratio=0.01)
-  trainloader = DataLoader(SpecDataset(trainset), args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SpecDataset(validset), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  trainloader = DataLoader(SignalDataset(trainset, n_seg=N_SEG, aug=True),  args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SignalDataset(validset,              aug=False), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
   model = DenoiseModel()
@@ -115,7 +128,7 @@ def train(args):
 if __name__ == '__main__':
   parser = ArgumentParser()
   parser.add_argument('-B', '--batch_size', type=int, default=16)
-  parser.add_argument('-E', '--epochs',     type=int, default=10000)
+  parser.add_argument('-E', '--epochs',     type=int, default=7000)
   parser.add_argument('-lr', '--lr',        type=eval, default=1e-4)
   parser.add_argument('--load', type=Path, help='ckpt to resume from')
   parser.add_argument('--seed', type=int, default=114514)

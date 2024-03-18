@@ -8,6 +8,8 @@ import tkinter.messagebox as tkmsg
 from argparse import ArgumentParser
 from traceback import print_exc, format_exc
 
+import librosa as L
+import librosa.display as LD
 from scipy.fftpack import fft
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
@@ -146,7 +148,8 @@ class App:
         elif self.args.T == 'log1p':
           x = wav_log1p(x)
 
-        M = get_spec(x, n_fft, hop_len, win_len)
+        D = L.stft(x, n_fft=n_fft, hop_length=hop_len, win_length=win_len)
+        M = np.clip(np.log10(np.abs(D) + 1e-15), a_min=EPS, a_max=None)
         c0 = L.feature.rms(y=x, frame_length=n_fft, hop_length=hop_len, pad_mode='reflect')[0]
         zcr = L.feature.zero_crossing_rate(x, frame_length=n_fft, hop_length=hop_len)[0]
         fft_data = np.abs(fft(np.expand_dims(x, axis=0), axis=1).squeeze(0))

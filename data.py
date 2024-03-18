@@ -42,35 +42,14 @@ class SignalDataset(Dataset):
 
     X = np.expand_dims(X, axis=0)
     Y = np.expand_dims(Y, axis=0)
-    ids = np.arange(*[e // HOP_LEN for e in id_rng])
-    return X, Y, ids
-
-
-class SpecDataset(SignalDataset):
-
-  def __init__(self, XY:List[Tuple[ndarray]], transform:Callable=None, n_seg:int=N_SEG):
-    super().__init__(XY, transform, n_seg)
-
-    self.get_spec_ = lambda x: get_spec(x.squeeze(0)[:-1], **FFT_PARAMS)[:-1]   # ignore last band (hifreq ~1e-5)
-
-  def __getitem__(self, idx) -> Tuple[ndarray, ndarray, ndarray]:
-    X, Y, ids = super().__getitem__(idx)
-    MX = self.get_spec_(X)   # [F=64, L=128]
-    MY = self.get_spec_(Y)
-    return MX, MY, ids
+    frame_ids = np.arange(*[e // HOP_LEN for e in id_rng])
+    return X, Y, frame_ids
 
 
 if __name__ == '__main__':
   dataset = SignalDataset(transform=wav_norm)
   for X, Y, ids in iter(dataset):
     stat_tensor(X, 'X')   # [1, 24000]
-    stat_tensor(Y, 'Y')
-    stat_tensor(ids, 'ids')
-    break
-
-  dataset = SpecDataset(transform=wav_norm)
-  for X, Y, ids in iter(dataset):
-    stat_tensor(X, 'X')   # [64, 128]
     stat_tensor(Y, 'Y')
     stat_tensor(ids, 'ids')
     break

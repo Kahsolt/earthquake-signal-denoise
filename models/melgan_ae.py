@@ -5,7 +5,6 @@
 from models.utils import *
 
 from mel2wav.modules import WNConv1d, WNConvTranspose1d, ResnetBlock, weights_init
-from models import Audio2Spec
 
 
 class GeneratorAE(nn.Module):
@@ -151,11 +150,8 @@ if __name__ == '__main__':
 
   netG = GeneratorAE(args.n_mel_channels, args.ngf, args.n_residual_layers)
   netD = DiscriminatorAE(args.n_mel_channels, args.num_D, args.ndf, args.n_layers_D, args.downsamp_factor)
-  fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, SR, device='cpu')
 
-  wav = torch.randn([4, 1, args.seq_len])
-  print('wav.shape:', wav.shape)
-  spec = fft(wav)
+  spec = torch.randn([4, args.n_mel_channels, NLEN // HOP_LEN])
   print('spec.shape:', spec.shape)
   spec_hat = netG(spec)
   print('spec_hat.shape:', spec_hat.shape)

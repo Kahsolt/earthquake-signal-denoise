@@ -2,6 +2,10 @@
 # Author: Armit
 # Create Time: 2024/03/13
 
+# log10(stft(QZ)) -> CZ
+# 优点: 直出波形的谱看似合理
+# 缺点: 直出的波形相位差异大、也不知道振幅该如何反归一化
+
 import sys
 from argparse import ArgumentParser
 

@@ -17,8 +17,7 @@ from torch.nn import Module as Model
 from torch import Tensor
 import numpy as np
 from numpy import ndarray
-import librosa as L
-import librosa.display as LD
+
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -54,6 +53,8 @@ EPS = 1e-5
 SEED = 114514
 
 
+''' misc '''
+
 def timer(fn):
   def wrapper(*args, **kwargs):
     start = time()
@@ -73,6 +74,8 @@ def stat_tensor(x:Tensor, name:str='X'):
   print('  avg:', x.mean())
   print('  std:', x.std())
 
+
+''' data '''
 
 @timer
 def get_data_train() -> Tuple[ndarray, ndarray]:
@@ -103,6 +106,8 @@ def get_submit_pred_maybe(nlen:int, fp:Path=None) -> ndarray:
   return X
 
 
+''' audio '''
+
 def wav_log1p(x:ndarray) -> ndarray:
   mask = x >= 0
   pos = x *  mask
@@ -119,17 +124,60 @@ def wav_norm(x:ndarray, C:float=1.0, remove_DC:bool=True) -> ndarray:
   if remove_DC: x -= x.mean(axis=-1, keepdims=True)   # remove DC offset
   return x
 
+def griffinlim_hijack(
+  specgram: Tensor,
+  init_phase: Tensor,
+  n_iter: int = 32,
+  n_fft: int = N_FFT,
+  hop_length: int = HOP_LEN,
+  win_length: int = WIN_LEN,
+  momentum: float = 0.99,
+  length: Optional[int] = None,
+) -> Tensor:
+  from torchaudio.functional import griffinlim
+  from torchaudio.transforms import GriffinLim
 
-def get_spec(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> ndarray:
-  D = L.stft(y, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
-  M = np.clip(np.log10(np.abs(D) + 1e-15), a_min=EPS, a_max=None)
-  return M
+  window = torch.hann_window(win_length).float().to(specgram.device)
+  momentum = momentum / (1 + momentum)
+  # pack batch
+  shape = specgram.size()
+  specgram = specgram.reshape([-1] + list(shape[-2:]))
+  # initialize the phase
+  angles = init_phase
+  # And initialize the previous iterate to 0
+  tprev = torch.tensor(0.0, dtype=specgram.dtype, device=specgram.device)
+  for _ in range(n_iter):
+    # Invert with our current estimate of the phases
+    inverse = torch.istft(specgram * angles, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, length=length)
+    # Rebuild the spectrogram
+    rebuilt = torch.stft(
+      input=inverse,
+      n_fft=n_fft,
+      hop_length=hop_length,
+      win_length=win_length,
+      window=window,
+      center=True,
+      pad_mode="reflect",
+      normalized=False,
+      onesided=True,
+      return_complex=True,
+    )
+    # Update our phase estimates
+    angles = rebuilt
+    if momentum:
+      angles -= tprev.mul_(momentum)
+    angles = angles.div(angles.abs().add(1e-16))
+    # Store the previous iterate
+    tprev = rebuilt
 
-def get_mag_phase(y:ndarray, n_fft:int=256, hop_length:int=16, win_length:int=64) -> Tuple[ndarray, ndarray]:
-  D = L.stft(y, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
-  mag, phase = L.spectrum.magphase(D)
-  return mag, phase
+  # Return the final phase estimates
+  waveform = torch.istft(specgram * angles, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, length=length)
+  # unpack batch
+  waveform = waveform.reshape(shape[:-2] + waveform.shape[-1:])
+  return waveform
 
+
+''' metrics '''
 
 def signal_noise_ratio(y_hat:ndarray, y:ndarray) -> float:
   ''' 信噪比对数值缩放敏感 '''
