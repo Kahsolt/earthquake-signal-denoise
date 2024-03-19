@@ -6,4 +6,4 @@ from .melgan_ae import GeneratorAE, DiscriminatorAE
 
 # these are deprecated
 #from .envolope import EnvolopeModel, EnvolopeExtractor
-#from .melgan import Generator, Discriminator, GeneratorTE
+from .melgan import Generator, Discriminator, GeneratorTE
