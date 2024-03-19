@@ -3,11 +3,12 @@
 # Create Time: 2024/03/06
 
 import os
+import yaml
 from zipfile import ZipFile, ZIP_DEFLATED
 from argparse import ArgumentParser
 
-from train_denoiser import LitModel as DenoiserLitModel
-from models import DenoiseModel, Audio2Spec
+from train_denoiser import LitModel
+from models import DenoiseModel, GeneratorAE, Audio2Spec
 from utils import *
 
 
@@ -24,8 +25,15 @@ if 'configs':
 @timer
 def infer(args):
   ''' Model & Ckpt '''
-  model: DenoiseModel = DenoiserLitModel.load_from_checkpoint(args.load, model=DenoiseModel()).model.eval().to(device)
-  model.remove_weight_norm()
+  if args.model == 'simple':
+    model = DenoiseModel()
+  elif args.model == 'melgan_ae':
+    model = GeneratorAE(N_SPEC, 32, 3)
+
+  lit = LitModel.load_from_checkpoint(args.load, model=model)
+  model: Union[DenoiseModel, GeneratorAE] = lit.model.eval().to(device)
+  if isinstance(model, DenoiseModel):
+    model.remove_weight_norm()
   fft = Audio2Spec(N_FFT, HOP_LEN, WIN_LEN, device)
 
   def denoise(X:Tensor) -> Tensor:
@@ -67,9 +75,12 @@ def infer(args):
       logS, P = fft(x_noisy, ret_mag=True, ret_phase=True)  # [B=1, F=65, L=750]
 
       # denoise
-      logS_low, logS_high = logS[:, :-1, :], torch.ones_like(logS[:, -1:, :]) * EPS    # suppress hifreq
-      logS_low_denoised = denoise(logS_low.squeeze(0)).unsqueeze(0)   # [F=64, L=750]
-      logS_denoised = torch.cat([logS_low_denoised, logS_high], dim=1)  # [B=1, F=65, L=750]
+      if isinstance(model, DenoiseModel):
+        logS_low, logS_high = logS[:, :-1, :], torch.ones_like(logS[:, -1:, :]) * EPS    # suppress hifreq
+        logS_low_denoised = denoise(logS_low.squeeze(0)).unsqueeze(0)   # [F=64, L=750]
+        logS_denoised = torch.cat([logS_low_denoised, logS_high], dim=1)  # [B=1, F=65, L=750]
+      elif isinstance(model, GeneratorAE):
+        logS_denoised = model(logS)
       S_denoised = 10 ** logS_denoised
 
       # inv_wav
@@ -107,6 +118,7 @@ def infer(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
+  parser.add_argument('-M', '--model', default='melgan_ae', choices=['simple', 'melgan_ae'])
   parser.add_argument('--load', required=True, type=Path, help='pretrained denoiser ckpt')
   parser.add_argument('--debug', action='store_true', help='plot debug results')
   args = parser.parse_args()

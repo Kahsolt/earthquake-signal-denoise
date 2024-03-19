@@ -13,7 +13,7 @@ from lightning import LightningModule, Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 from data import SignalDataset, DataLoader, make_split
-from models import DenoiseModel, Audio2Spec
+from models import DenoiseModel, GeneratorAE, Audio2Spec
 from utils import *
 
 
@@ -38,35 +38,17 @@ class LitModel(LightningModule):
   def configure_optimizers(self) -> Optimizer:
     return Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
 
-  def not_on_after_backward(self):
-    found_nan_or_inf = False
-    for param in self.parameters():
-      if not found_nan_or_inf: break
-      if param.grad is not None:
-        found_nan_or_inf = torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
-    if found_nan_or_inf:
-      self.zero_grad()
-      print(f'>> detected inf or nan values in gradients. not updating model parameters')
-      breakpoint()
-
   def get_losses(self, batch:Tuple[Tensor], prefix:str) -> Tensor:
     x_wav, y_wav, ids = batch
-    x_spec = self.fft(x_wav)[:, :-1, :]
-    y_spec = self.fft(y_wav)[:, :-1, :]
+    x_spec = self.fft(x_wav)
+    y_spec = self.fft(y_wav)
 
-    if not 'debug gradient NaN':
-      self.x_wav, self.y_wav, self.ids = x_wav, y_wav, ids
-      self.x_spec, self.y_spec = x_spec, y_spec
-      if any([
-        torch.isnan(x_wav).any(),  torch.isinf(x_wav).any(),
-        torch.isnan(y_wav).any(),  torch.isinf(y_wav).any(),
-        torch.isnan(x_spec).any(), torch.isinf(x_spec).any(),
-        torch.isnan(y_spec).any(), torch.isinf(y_spec).any(),
-      ]):
-        print(f'>> detected inf or nan values in inputs')
-        breakpoint()
-
-    output = self.model(x_spec, ids)
+    if self.args.model == 'simple':
+      x_spec = x_spec[:, :-1, :]
+      y_spec = y_spec[:, :-1, :]
+      output = self.model(x_spec, ids)
+    elif self.args.model == 'melgan_ae':
+      output = self.model(x_spec)
     loss = F.l1_loss(output, y_spec)
 
     if prefix == 'train':
@@ -96,11 +78,15 @@ def train(args):
   }
   X, Y = get_data_train()
   trainset, validset = make_split(X, Y, ratio=0.01)
-  trainloader = DataLoader(SignalDataset(trainset, n_seg=N_SEG, aug=True),  args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
-  validloader = DataLoader(SignalDataset(validset, n_seg=N_SEG, aug=False), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
+  n_seg = N_SEG if args.model == 'simple' else -1
+  trainloader = DataLoader(SignalDataset(trainset, n_seg=n_seg, aug=True),  args.batch_size, shuffle=True,  drop_last=True,  **dataloader_kwargs)
+  validloader = DataLoader(SignalDataset(validset, n_seg=n_seg, aug=False), args.batch_size, shuffle=False, drop_last=False, **dataloader_kwargs)
 
   ''' Model & Optim '''
-  model = DenoiseModel()
+  if args.model == 'simple':
+    model = DenoiseModel()
+  elif args.model == 'melgan_ae':
+    model = GeneratorAE(N_SPEC, 32, 3)
   lit = LitModel(model)
   if args.load:
     lit = LitModel.load_from_checkpoint(args.load, model=model)
@@ -121,6 +107,7 @@ def train(args):
 
 if __name__ == '__main__':
   parser = ArgumentParser()
+  parser.add_argument('-M', '--model', default='melgan_ae', choices=['simple', 'melgan_ae'])
   parser.add_argument('-B', '--batch_size', type=int, default=16)
   parser.add_argument('-E', '--epochs',     type=int, default=7000)
   parser.add_argument('-lr', '--lr',        type=eval, default=1e-4)
