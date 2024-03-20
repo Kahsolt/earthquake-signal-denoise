@@ -4,8 +4,11 @@
 
 ----
 
+⚠ 弃赛了，没有找到思路 :(
+
 Contest page: [http://practice.tanzhonghedasai.com/top/index.html#/good?id=1725046816823468033](http://practice.tanzhonghedasai.com/top/index.html#/good?id=1725046816823468033)  
 Team Name: 御霊一片祈八百万救给  
+Final score: rank #17, no award :(
 
 
 ### Quickstart
